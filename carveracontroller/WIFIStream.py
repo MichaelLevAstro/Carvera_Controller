@@ -5,6 +5,7 @@ import socket
 import select
 
 from .XMODEM import XMODEM
+from .protocol import FramedFileTransfer
 import logging
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ class WIFIStream:
     def __init__(self, log_sent_receive = False):
 
         self.modem = XMODEM(self.getc, self.putc, 'xmodem8k')
+        self.framed = False   # set True by the controller for a Z1 connection
 
         handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(logging.WARNING)
@@ -105,7 +107,7 @@ class WIFIStream:
         return data
 
     # ----------------------------------------------------------------------
-    def open(self, address):
+    def open(self, address, esp32=False):
         self.socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         ip_port = address.split(':')
         self.socket.settimeout(2)
@@ -172,15 +174,25 @@ class WIFIStream:
     def upload(self, filename, local_md5, callback):
         # do upload
         stream = open(filename, 'rb')
-        result = self.modem.send(stream, md5 = local_md5, retry = 10, callback = callback)
+        if self.framed:
+            self._framed = FramedFileTransfer(self.getc, self.putc)
+            result = self._framed.send(stream, md5=local_md5, callback=callback)
+        else:
+            result = self.modem.send(stream, md5 = local_md5, retry = 10, callback = callback)
         stream.close()
         return result
 
     def download(self, filename, local_md5, callback):
         stream = open(filename, 'wb')
-        result = self.modem.recv(stream, md5 = local_md5, retry = 10, callback = callback)
+        if self.framed:
+            self._framed = FramedFileTransfer(self.getc, self.putc)
+            result = self._framed.recv(stream, md5=local_md5, callback=callback)
+        else:
+            result = self.modem.recv(stream, md5 = local_md5, retry = 10, callback = callback)
         stream.close()
         return result
 
     def cancel_process(self):
+        if self.framed and getattr(self, '_framed', None):
+            self._framed.canceled = True
         self.modem.canceled = True

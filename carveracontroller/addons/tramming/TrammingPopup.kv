@@ -1,0 +1,115 @@
+#:include addons/tramming/TrammingSettings.kv
+
+
+<TrammingPopup>:
+    title: tr._('Tramming')
+    size_hint: 0.6, 0.7
+    pos_hint: {"center_x": 0.5, "center_y": 0.5}
+    auto_dismiss: False
+    overlay_color: 0, 0, 0, 0.3
+
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(6)
+        spacing: dp(6)
+
+        Label:
+            size_hint_y: None
+            height: dp(46)
+            text: tr._('Sweep an axis between two machine positions (G53) in a loop so you can dial-in squareness. Set Min/Max, then Start. Stop halts after the current move.')
+            text_size: self.width, None
+            halign: 'center'
+            valign: 'middle'
+
+        TabbedPanel:
+            id: tabs
+            do_default_tab: False
+            tab_width: dp(90)
+            bar_width: 8
+
+            TabbedPanelItem:
+                text: 'X'
+                BoxLayout:
+                    orientation: 'vertical'
+                    TrammingSettings:
+                        id: settings_x
+                        axis: 'X'
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(44)
+                        padding: dp(6)
+                        Button:
+                            text: tr._('Start X Sweep')
+                            disabled: root.running
+                            on_release: root.start_tramming('X')
+
+            TabbedPanelItem:
+                text: 'Y'
+                BoxLayout:
+                    orientation: 'vertical'
+                    TrammingSettings:
+                        id: settings_y
+                        axis: 'Y'
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(44)
+                        padding: dp(6)
+                        Button:
+                            text: tr._('Start Y Sweep')
+                            disabled: root.running
+                            on_release: root.start_tramming('Y')
+
+            TabbedPanelItem:
+                text: 'Z'
+                BoxLayout:
+                    orientation: 'vertical'
+                    TrammingSettings:
+                        id: settings_z
+                        axis: 'Z'
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(44)
+                        padding: dp(6)
+                        Button:
+                            text: tr._('Start Z Sweep')
+                            disabled: root.running
+                            on_release: root.start_tramming('Z')
+
+            TabbedPanelItem:
+                text: 'A'
+                BoxLayout:
+                    orientation: 'vertical'
+                    TrammingSettings:
+                        id: settings_a
+                        axis: 'A'
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(44)
+                        padding: dp(6)
+                        Button:
+                            text: tr._('Start A Sweep') if app.has_4axis else tr._('No 4th Axis')
+                            disabled: root.running or not app.has_4axis
+                            on_release: root.start_tramming('A')
+
+        Label:
+            size_hint_y: None
+            height: dp(28)
+            text: root.status_text
+            halign: 'center'
+            valign: 'middle'
+            text_size: self.size
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(44)
+            spacing: dp(6)
+            Button:
+                text: tr._('Stop')
+                disabled: not root.running
+                background_color: 1, 0.4, 0.4, 1
+                on_release: root.stop_tramming()
+            Button:
+                id: tramming_close
+                text: tr._('Close')
+                disabled: root.running
+                on_release: root.dismiss()

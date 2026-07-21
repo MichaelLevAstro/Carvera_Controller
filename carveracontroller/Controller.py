@@ -25,6 +25,7 @@ from .USBStream import USBStream
 from .WIFIStream import WIFIStream
 from .XMODEM import EOT, CAN
 from . import Utils
+from . import protocol
 from functools import partial
 
 try:
@@ -172,6 +173,17 @@ class Controller:
 
         self.is_community_firmware = False
 
+        # Wire protocol: 'raw' for Carvera/Air (newline commands + XMODEM),
+        # 'framed' for the Z1 (binary frames). Set at connection time.
+        self.protocol = 'raw'
+        self.frame_decoder = None
+        self.last_alarm_message = ''
+
+        # Probe result capture for host-side (Z1) probing: last [PRB:x,y,z:ok]
+        # in machine coordinates, and a counter that increments on each result.
+        self.last_prb = None
+        self.prb_count = 0
+
         # Jog related variables
         self.jog_mode = Controller.JOG_MODE_STEP
         self.jog_speed = 10000  # mm/min. A value of 0 here would suggest to use last used feed
@@ -209,20 +221,45 @@ class Controller:
         #    time.sleep(0.5)
         if self.stream and line:
             try:
-                if line[-1] != '\n':
-                    line += "\n"
-                self.stream.send(line.encode())
-                if self.execCallback:
-                    # 检查文件名是否以 ".lz" 结尾
-                    if line.endswith(".lz\n"):
-                        # 删除 ".lz" 后缀
-                        new_line = line[:-4] + "\n"
-                    else:
-                        # 如果没有 ".lz" 后缀，直接赋值
-                        new_line = line
-                    self.execCallback(new_line)
+                self._send_command_line(line, file_start=False)
             except:
                 self.log.put((Controller.MSG_ERROR, str(sys.exc_info()[1])))
+
+    # ----------------------------------------------------------------------
+    # Send a command line, framing it for the Z1 or sending it raw otherwise.
+    # file_start=True marks upload/download commands, which the Z1 expects in a
+    # FILE_START frame; in raw mode both paths are identical newline text.
+    # ----------------------------------------------------------------------
+    def _send_command_line(self, line, file_start=False, echo=True):
+        if line and line[-1] != '\n':
+            line += "\n"
+        if self.protocol == 'framed':
+            if file_start:
+                self.stream.send(protocol.encode_file_command(line))
+            else:
+                self.stream.send(protocol.encode_command(line))
+        else:
+            self.stream.send(line.encode())
+        if echo and self.execCallback:
+            # strip a trailing ".lz" (compressed upload) for the on-screen echo
+            new_line = line[:-4] + "\n" if line.endswith(".lz\n") else line
+            self.execCallback(new_line)
+
+    # ----------------------------------------------------------------------
+    # Send a single realtime control byte ('?', '!', '~', 0x18, 0x19, ...).
+    # ----------------------------------------------------------------------
+    def _send_realtime(self, value):
+        if self.stream is None:
+            return
+        if self.protocol == 'framed':
+            self.stream.send(protocol.encode_realtime(value))
+        else:
+            if isinstance(value, int):
+                self.stream.send(bytes([value]))
+            elif isinstance(value, (bytes, bytearray)):
+                self.stream.send(bytes(value))
+            else:
+                self.stream.send(value.encode())
 
     # ----------------------------------------------------------------------
     def autoCommand(self, margin=False, zprobe=False, zprobe_abs=False, leveling=False, goto_origin=False, z_probe_offset_x=0, z_probe_offset_y=0, i=3, j=3, h=5, buffer=False, auto_level_offsets = [0,0,0,0], upcoming_tool=0):
@@ -560,13 +597,27 @@ class Controller:
         upload_command = "upload %s\n" % filename.replace(' ', '\x01')
         if '\\' in filename:
             upload_command = "upload %s\n" % '/'.join(filename.split('\\')).replace(' ', '\x01')
-        self.executeCommand(self.escape(upload_command))
+        self._executeFileCommand(self.escape(upload_command))
 
     def downloadCommand(self, filename):
         download_command = "download %s\n" % filename.replace(' ', '\x01')
         if '\\' in filename:
             download_command = "download %s\n" % '/'.join(filename.split('\\')).replace(' ', '\x01')
-        self.executeCommand(self.escape(download_command))
+        self._executeFileCommand(self.escape(download_command))
+
+    def _executeFileCommand(self, line):
+        """Send an upload/download command (FILE_START frame on the Z1)."""
+        if self.stream and line:
+            try:
+                if self.protocol == 'framed':
+                    # The Z1 starts replying with file-transfer frames the moment
+                    # it receives this command. Pause the RX loop first so those
+                    # frames are read by FramedFileTransfer, not eaten (and
+                    # discarded) by streamIO.
+                    self.paused = True
+                self._send_command_line(line, file_start=True)
+            except:
+                self.log.put((Controller.MSG_ERROR, str(sys.exc_info()[1])))
 
     def suspendCommand(self):
         self.executeCommand("suspend\n")
@@ -1218,26 +1269,26 @@ class Controller:
 
     def feedholdCommand(self):
         if self.stream:
-            self.stream.send('!'.encode())
+            self._send_realtime(ord('!'))
 
     def toggleFeedholdCommand(self, holding):
         if self.stream:
             if holding:
-                self.stream.send('~'.encode())
+                self._send_realtime(ord('~'))
             else:
-                self.stream.send('!'.encode())
+                self._send_realtime(ord('!'))
 
     def cyclestartCommand(self):
         if self.stream:
-            self.stream.send('~'.encode())
+            self._send_realtime(ord('~'))
 
     def estopCommand(self):
         if self.stream:
-            self.stream.send(b'\x18')
+            self._send_realtime(0x18)
 
     # ----------------------------------------------------------------------
     def hardResetPre(self):
-        self.stream.send(b"reset\n")
+        self._send_command_line("reset\n", echo=False)
 
     def hardResetAfter(self):
         time.sleep(6)
@@ -1424,7 +1475,7 @@ class Controller:
     # ----------------------------------------------------------------------
     # Open serial port or wifi connect
     # ----------------------------------------------------------------------
-    def open(self, conn_type, address):
+    def open(self, conn_type, address, framed=None):
         # init connection
         self.connection_type = conn_type
         # Persist the last connection target so callers can detect "same machine"
@@ -1436,7 +1487,22 @@ class Controller:
         else:
             self.stream = self.wifi_stream
 
-        if self.stream.open(address):
+        # Select the wire protocol. `framed` may be True/False from a caller
+        # that already knows the machine type (USB VID/PID or WiFi broadcast
+        # name); if None we probe the connection once it is open.
+        self.frame_decoder = protocol.FrameDecoder()
+        # A Z1 (framed) connects over ESP32 native USB, which must not get the
+        # Arduino-style DTR reset the raw path uses.
+        esp32 = bool(framed)
+        opened = (self.stream.open(address, esp32=esp32)
+                  if conn_type == CONN_USB else self.stream.open(address))
+        if opened:
+            if framed is None:
+                self.protocol = self._probe_protocol()
+            else:
+                self.protocol = 'framed' if framed else 'raw'
+            self.stream.framed = (self.protocol == 'framed')
+            logger.info("Using %s protocol", self.protocol)
             CNC.vars["state"] = CONNECTED
             CNC.vars["color"] = STATECOLOR[CNC.vars["state"]]
             self.log.put((self.MSG_NORMAL, 'Connected to machine!'))
@@ -1454,6 +1520,43 @@ class Controller:
             return True
         else:
             self.log.put((self.MSG_ERROR, 'Connection Failed!'))
+
+    # ----------------------------------------------------------------------
+    # Probe an open connection to decide raw vs framed protocol.
+    # Raw is tried first: a Carvera/Air answers plain "version" and we stop
+    # there (it never sees framed bytes). A Z1 ignores the unframed request,
+    # so we fall back to a framed request and look for a valid frame.
+    # ----------------------------------------------------------------------
+    def _probe_protocol(self):
+        def drain(seconds, until=None):
+            buf = bytearray()
+            end = time.time() + seconds
+            while time.time() < end:
+                try:
+                    if self.stream.waiting_for_recv():
+                        buf.extend(self.stream.recv())
+                        if until and until(buf):
+                            break
+                    else:
+                        time.sleep(0.02)
+                except Exception:
+                    time.sleep(0.02)
+            return bytes(buf)
+        try:
+            drain(0.3)  # discard any connect-time greeting
+            # Raw first: a Carvera/Air answers quickly and never sees framed bytes.
+            self.stream.send(b"version\n")
+            raw = drain(1.0, until=lambda b: b"version" in b or b"model" in b)
+            if b"version" in raw or b"model" in raw or b"Carvera" in raw:
+                return 'raw'
+            # No plain-text reply: try a framed request and look for a valid frame.
+            self.stream.send(protocol.encode_command("version"))
+            framed = drain(1.2, until=lambda b: protocol.FRAME_END.to_bytes(2, 'big') in b)
+            if protocol.FrameDecoder().feed(framed):
+                return 'framed'
+        except Exception:
+            pass
+        return 'raw'
 
     # ----------------------------------------------------------------------
     # Close connection port
@@ -1578,14 +1681,18 @@ class Controller:
     # ----------------------------------------------------------------------
     def sendHex(self, hexcode):
         if self.stream is None: return
-        self.stream.send(chr(int(hexcode, 16)))
+        self._send_realtime(int(hexcode, 16))
         self.stream.flush()
 
     def viewStatusReport(self, sio_status):
         if self.loadNUM == 0 and self.sendNUM == 0:
             if self.stream is None:
                 return
-            if self.continuous_jog_active:
+            if self.protocol == 'framed':
+                # The '?1' continuous-jog status variant is a Community-firmware
+                # extension; the Z1 uses the plain single-char status request.
+                self._send_realtime(ord('?'))
+            elif self.continuous_jog_active:
                 self.stream.send(b"?1")
             else:
                 self.stream.send(b"?")
@@ -1595,7 +1702,7 @@ class Controller:
         if self.loadNUM == 0 and self.sendNUM == 0:
             if self.stream is None:
                 return
-            self.stream.send(b"diagnose\n")
+            self._send_command_line("diagnose\n", echo=False)
             self.sio_diagnose = sio_diagnose
 
     # ----------------------------------------------------------------------
@@ -1613,7 +1720,7 @@ class Controller:
 
     def softReset(self, clearAlarm=True):
         if self.stream:
-            self.stream.send(b"\030")
+            self._send_realtime(0x18)
         self.stopProbe()
         if clearAlarm: self._alarm = False
         CNC.vars["_OvChanged"] = True  # force a feed change if any
@@ -1638,7 +1745,7 @@ class Controller:
         self.sendGCode("$G")
 
     def viewBuild(self):
-        self.stream.send(b"version\n")
+        self._send_command_line("version\n", echo=False)
         self.sendGCode("$I")
 
     def viewStartup(self):
@@ -1648,7 +1755,7 @@ class Controller:
         pass
 
     def grblHelp(self):
-        self.stream.send(b"help\n")
+        self._send_command_line("help\n", echo=False)
 
     def grblRestoreSettings(self):
         pass
@@ -1695,7 +1802,7 @@ class Controller:
         
         # Send Y^ (Ctrl+Y) to stop continuous jogging
         if self.stream is not None and self.continuous_jog_active:
-            self.stream.send(b"\031")
+            self._send_realtime(0x19)
 
     def jog(self, _dir, speed=None):
         if self.jog_mode == Controller.JOG_MODE_STEP:
@@ -1784,14 +1891,14 @@ class Controller:
     def feedHold(self, event=None):
         if event is not None and not self.acceptKey(True): return
         if self.stream is None: return
-        self.stream.send(b"!")
+        self._send_realtime(ord('!'))
         self.stream.flush()
         self._pause = True
 
     def resume(self, event=None):
         if event is not None and not self.acceptKey(True): return
         if self.stream is None: return
-        self.stream.send(b"~")
+        self._send_realtime(ord('~'))
         self.stream.flush()
         self._alarm = False
         self._pause = False
@@ -1836,6 +1943,12 @@ class Controller:
             elif line[0] == "[" in line:
                 # Log raw WCS parameters before parsing
                 self.log.put((self.MSG_NORMAL, line))
+                # Capture probe results for host-side probing: [PRB:x,y,z:ok]
+                if line.startswith("[PRB:"):
+                    prb = re.match(r"\[PRB:([+\-]?\d*\.?\d+),([+\-]?\d*\.?\d+),([+\-]?\d*\.?\d+):(\d)\]", line)
+                    if prb:
+                        self.last_prb = (float(prb[1]), float(prb[2]), float(prb[3]), int(prb[4]))
+                        self.prb_count += 1
                 # Parse WCS parameters: [G54:-123.6800,-123.6800,-123.6800,-50,0.000,25.123]
                 self.parseWCSParameters(line)
             elif line[0] == "#":
@@ -1907,37 +2020,11 @@ class Controller:
                     td = t
 
                 if self.stream.waiting_for_recv():
-                    received = [bytes([b]) for b in self.stream.recv()]
-                    for c in received:
-                        if c == EOT or c == CAN:
-                            # Ctrl + Z means transmission complete, Ctrl + D means transmission cancel or error
-                            if len(line) > 0:
-                                self.load_buffer.put(line.decode(errors='ignore'))
-                                if self.loadNUM > 0:
-                                    self.load_buffer_size += len(line)
-                            line = b''
-                            if c == EOT:
-                                self.loadEOF = True
-                            else:
-                                self.loadERR = True
-                        else:
-                            if c == b'\n':
-                                # (line.decode(errors='ignore'))
-                                if self.loadNUM == 0 or '|MPos' in line.decode(errors='ignore'):
-                                    self.parseLine(line.decode(errors='ignore'))
-                                else:
-                                    # 将字节串解码为字符串
-                                    decoded_line = line.decode(errors='ignore')
-                                    # 使用正则表达式去除以"<"开头，以">"结尾的部分
-                                    cleaned_line = re.sub(r'<.*?>', '', decoded_line)
-                                    # 去除多余的空格（如果需要）
-                                    cleaned_line = cleaned_line.strip()
-                                    if len(cleaned_line) != 0:
-                                        self.load_buffer.put(cleaned_line)
-                                        self.load_buffer_size += len(cleaned_line) + 1
-                                line = b''
-                            else:
-                                line += c
+                    data = self.stream.recv()
+                    if self.protocol == 'framed':
+                        self._process_framed(data)
+                    else:
+                        line = self._process_raw(data, line)
                     dynamic_delay = 0
                 else:
                     if self.sendNUM == 0 and self.loadNUM == 0:
@@ -1957,6 +2044,70 @@ class Controller:
 
             if dynamic_delay > 0:
                 time.sleep(dynamic_delay)
+
+    # ----------------------------------------------------------------------
+    # Route a single completed text line (shared by raw and framed paths).
+    # ----------------------------------------------------------------------
+    def _handle_load_line(self, line_str):
+        if self.loadNUM == 0 or '|MPos' in line_str:
+            self.parseLine(line_str)
+        else:
+            cleaned_line = re.sub(r'<.*?>', '', line_str).strip()
+            if len(cleaned_line) != 0:
+                self.load_buffer.put(cleaned_line)
+                self.load_buffer_size += len(cleaned_line) + 1
+
+    # ----------------------------------------------------------------------
+    # Raw newline protocol byte processing (Carvera / Carvera Air).
+    # Returns the updated partial line buffer.
+    # ----------------------------------------------------------------------
+    def _process_raw(self, data, line):
+        for c in (bytes([b]) for b in data):
+            if c == EOT or c == CAN:
+                # Ctrl+Z = transmission complete, Ctrl+D = cancel/error
+                if len(line) > 0:
+                    self.load_buffer.put(line.decode(errors='ignore'))
+                    if self.loadNUM > 0:
+                        self.load_buffer_size += len(line)
+                line = b''
+                if c == EOT:
+                    self.loadEOF = True
+                else:
+                    self.loadERR = True
+            elif c == b'\n':
+                self._handle_load_line(line.decode(errors='ignore'))
+                line = b''
+            else:
+                line += c
+        return line
+
+    # ----------------------------------------------------------------------
+    # Framed binary protocol frame processing (Makera Z1).
+    # ----------------------------------------------------------------------
+    def _process_framed(self, data):
+        if self.frame_decoder is None:
+            self.frame_decoder = protocol.FrameDecoder()
+        for ptype, payload in self.frame_decoder.feed(data):
+            if ptype == protocol.PTYPE_LOAD_FINISH:
+                self.loadEOF = True
+            elif ptype == protocol.PTYPE_LOAD_ERROR:
+                self.loadERR = True
+            elif ptype == protocol.PTYPE_ALARM_INFO:
+                msg = payload.decode('utf-8', errors='ignore').strip()
+                if msg:
+                    self.last_alarm_message = msg
+                    self.log.put((Controller.MSG_ERROR, msg))
+            elif ptype == protocol.PTYPE_FILE_QUERY:
+                content = payload.decode('utf-8', errors='ignore').strip()
+                if content:
+                    self.log.put((Controller.MSG_INTERIOR, 'playing_file=' + content))
+            elif ptype in (protocol.PTYPE_STATUS_RES, protocol.PTYPE_DIAG_RES,
+                           protocol.PTYPE_NORMAL_INFO, protocol.PTYPE_LOAD_INFO):
+                text = protocol.payload_text(ptype, payload)
+                for ln in text.replace('\r\n', '\n').split('\n'):
+                    self._handle_load_line(ln)
+            # File-transfer frames (0xB1-0xB6) are consumed by FramedFileTransfer
+            # while the stream is paused, so they do not reach here.
 
     def parseWCSParameters(self, line):
         """Parse WCS parameters from machine response"""

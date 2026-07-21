@@ -23,7 +23,7 @@ class BoreSettings(BoxLayout):
         ConfigUtils.save_config(self.config, self.config_filename)
 
     def order_config(self, config: dict[str, float]):
-        order = ["X", "Y", "Z", "J", "D", "H", "F", "K", "L", "R", "C", "Q", "E", "S", "I"]
+        order = ["X", "Y", "Z", "J", "D", "P", "H", "F", "K", "L", "R", "C", "Q", "E", "S", "I"]
         temp_config = {}
         for key in order:
             if key in config:

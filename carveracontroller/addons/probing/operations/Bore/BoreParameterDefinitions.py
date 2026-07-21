@@ -31,4 +31,9 @@ class BoreParameterDefinitions:
 
     ProbeTipDiameter = ProbeSettingDefinition('D', "Tip Dia", False, "Probe Tip Diameter, stored in config")
 
+    SamplePoints = ProbeSettingDefinition('P', "Samples", False,
+                                          "Number of points to probe around a round bore for the "
+                                          "least-squares circle fit (minimum 3). More points average "
+                                          "out bore form error for a more accurate centre.", "4")
+
     UseProbeNormallyClosed = ProbeSettingDefinition('I', "NC", False, "Probe is normally closed")

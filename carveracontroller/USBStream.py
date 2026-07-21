@@ -4,6 +4,7 @@ import serial
 import sys
 
 from .XMODEM import XMODEM
+from .protocol import FramedFileTransfer
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ class USBStream:
     # ----------------------------------------------------------------------
     def __init__(self, log_sent_receive = False):
         self.modem = XMODEM(self.getc, self.putc, 'xmodem')
+        self.framed = False   # set True by the controller for a Z1 connection
         handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(logging.WARNING)
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -65,7 +67,7 @@ class USBStream:
         return data
 
     # ----------------------------------------------------------------------
-    def open(self, address, baud=115200):
+    def open(self, address, baud=115200, esp32=False):
         self._address = address.replace('\\', '\\\\')
         self.serial = serial.serial_for_url(
             self._address,
@@ -77,6 +79,12 @@ class USBStream:
             write_timeout=SERIAL_TIMEOUT,
             xonxoff=False,
             rtscts=False)
+        if esp32:
+            # The Z1 is an ESP32 native-USB device: DTR/RTS toggling can force a
+            # chip reset (or bootloader), and the raw buffer-clear bytes are not
+            # part of the framed protocol. Skip both.
+            self.serial.flushInput()
+            return True
         # Toggle DTR to reset Arduino
         try:
             self.serial.setDTR(0)
@@ -153,15 +161,25 @@ class USBStream:
     def upload(self, filename, local_md5, callback):
         # do upload
         stream = open(filename, 'rb')
-        result = self.modem.send(stream, md5 = local_md5, retry = 10, callback = callback)
+        if self.framed:
+            self._framed = FramedFileTransfer(self.getc, self.putc)
+            result = self._framed.send(stream, md5=local_md5, callback=callback)
+        else:
+            result = self.modem.send(stream, md5 = local_md5, retry = 10, callback = callback)
         stream.close()
         return result
 
     def download(self, filename, local_md5, callback):
         stream = open(filename, 'wb')
-        result = self.modem.recv(stream, md5 = local_md5, retry = 10, callback = callback)
+        if self.framed:
+            self._framed = FramedFileTransfer(self.getc, self.putc)
+            result = self._framed.recv(stream, md5=local_md5, callback=callback)
+        else:
+            result = self.modem.recv(stream, md5 = local_md5, retry = 10, callback = callback)
         stream.close()
         return result
 
     def cancel_process(self):
+        if self.framed and getattr(self, '_framed', None):
+            self._framed.canceled = True
         self.modem.canceled = True

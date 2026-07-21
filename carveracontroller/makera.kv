@@ -4,6 +4,7 @@
 #:import tr carveracontroller.__main__.tr
 #:include addons/tooltips/Tooltips.kv
 #:include addons/probing/ProbingPopup.kv
+#:include addons/tramming/TrammingPopup.kv
 
 <Label>:
     font_name: 'ARIALUNI'
@@ -830,7 +831,7 @@
         values: 'Probe', 'Tool: 1', 'Tool: 2', 'Tool: 3', 'Tool: 4', 'Tool: 5', 'Tool: 6', 'Custom'
         on_text:
             if self.text == 'Custom': app.root.coord_popup.change_tool_popup.open()
-            if self.text == '3D Probe': app.root.controller.changeToolCommand(999990)
+            if self.text == '3D Probe': app.root.controller.changeToolCommand(app.probe_3d_tool)
             elif self.text != tr._("Change..."): app.root.controller.changeToolCommand(self.text[-1])
             if self.text != tr._("Change..."): self.text = tr._('Change...')
             root.select('Third Item')
@@ -857,7 +858,7 @@
         values: 'Empty', 'Probe', 'Tool: 1', 'Tool: 2', 'Tool: 3', 'Tool: 4', 'Tool: 5', 'Tool: 6', 'Custom'
         on_text:
             if self.text == 'Custom': app.root.coord_popup.settool_popup.open()
-            if self.text == '3D Probe': app.root.controller.setToolCommand(999990)
+            if self.text == '3D Probe': app.root.controller.setToolCommand(app.probe_3d_tool)
             elif self.text != tr._("Set..."): app.root.controller.setToolCommand(self.text[-1])
             if self.text != tr._("Set..."): self.text = tr._('Set...')
             root.select('Third Item')
@@ -1517,10 +1518,10 @@
                     root.dismiss()
             Button:
                 text: tr._('Change to 3D probe')
-                disabled: not app.is_community_firmware
+                disabled: not (app.is_community_firmware or app.model == 'Z1')
                 on_release:
                     root.dismiss()
-                    app.root.controller.changeToolCommand(999990)
+                    app.root.controller.changeToolCommand(app.probe_3d_tool)
             Button:
                 text: tr._('Change to stock Makera probe')
                 on_release:
@@ -3824,7 +3825,7 @@
                                                 on_release: root.coord_popup.origin_popup.open()
                                         GridBoxLayout:
                                             SmallRoundButton:
-                                                disabled: not app.is_community_firmware
+                                                disabled: not (app.is_community_firmware or app.model == 'Z1')
                                                 text: tr._('Probing...')
                                                 on_release: app.root.open_probing_popup()
 
@@ -3843,7 +3844,10 @@
                                                 on_release: app.root.controller.setExternalControl(100 if self.state=="down" else 0)
 
                                         GridBoxLayout:
-                                        # empty spot
+                                            SmallRoundButton:
+                                                disabled: app.state != 'Idle'
+                                                text: tr._('Tramming...')
+                                                on_release: app.root.open_tramming_popup()
 
                             Widget:
                                 size_hint_y: 0.1
@@ -4132,6 +4136,21 @@
                                 id: gcode_viewer_container
                                 pos: float_layout.pos
                                 orientation: 'vertical'
+                            # Z1 live camera view: sits in the free area between the top
+                            # tool bar and the bottom control bar so it is not hidden behind
+                            # them (fills the whole pane when those bars are collapsed).
+                            # CameraView applies host-side brightness/contrast/gamma.
+                            CameraView:
+                                id: video_image
+                                brightness: app.video_brightness
+                                contrast: app.video_contrast
+                                gamma: app.video_gamma
+                                size_hint: None, None
+                                x: float_layout.x
+                                width: float_layout.width
+                                y: gcode_ctl_bar.top
+                                height: (tool_bar.y - gcode_ctl_bar.top) if (app.video_connected and app.model == 'Z1') else 0
+                                opacity: 1 if (app.video_connected and app.model == 'Z1') else 0
                             BoxLayout:
                                 id: tool_bar
                                 orbit: True
@@ -4341,6 +4360,108 @@
                                     max: 1000
                                     value: 1000
                                     disabled: app.selected_remote_filename == '' and app.selected_local_filename == ''
+                            # Z1 camera controls stacked top-right of the viewer: stream
+                            # toggle, adjustment gear, then the slider panel. A single
+                            # vertical container lets the layout engine stack them (the
+                            # earlier per-widget pos_hint + absolute top: fought each other).
+                            BoxLayout:
+                                id: video_controls
+                                orientation: 'vertical'
+                                size_hint: None, None
+                                width: '250dp'
+                                height: self.minimum_height
+                                pos_hint: {'right': 1, 'top': 1}
+                                opacity: 1 if app.model == 'Z1' else 0
+                                AnchorLayout:
+                                    anchor_x: 'right'
+                                    anchor_y: 'top'
+                                    size_hint_y: None
+                                    height: '50dp' if app.model == 'Z1' else 0
+                                    TransparentButton:
+                                        id: video_toggle
+                                        icon: 'data/video.png'
+                                        active: app.video_connected
+                                        size_hint: None, None
+                                        width: '50dp'
+                                        height: '50dp'
+                                        disabled: app.state == 'N/A' or app.model != 'Z1'
+                                        on_release:
+                                            app.root.video_manager.toggle_video_stream()
+                                AnchorLayout:
+                                    anchor_x: 'right'
+                                    anchor_y: 'top'
+                                    size_hint_y: None
+                                    height: '50dp' if (app.model == 'Z1' and app.video_connected) else 0
+                                    opacity: 1 if (app.model == 'Z1' and app.video_connected) else 0
+                                    TransparentButton:
+                                        id: video_adjust_btn
+                                        icon: 'data/configure.png'
+                                        active: app.video_adjust_open
+                                        size_hint: None, None
+                                        width: '50dp'
+                                        height: '50dp'
+                                        disabled: not app.video_connected
+                                        on_release:
+                                            app.video_adjust_open = not app.video_adjust_open
+                                BoxLayout:
+                                    id: video_adjust_panel
+                                    orientation: 'vertical'
+                                    size_hint_y: None
+                                    height: '160dp' if (app.video_adjust_open and app.video_connected and app.model == 'Z1') else 0
+                                    opacity: 1 if (app.video_adjust_open and app.video_connected and app.model == 'Z1') else 0
+                                    disabled: not (app.video_adjust_open and app.video_connected and app.model == 'Z1')
+                                    padding: '8dp'
+                                    spacing: '4dp'
+                                    canvas.before:
+                                        Color:
+                                            rgba: 0, 0, 0, 0.6
+                                        Rectangle:
+                                            pos: self.pos
+                                            size: self.size
+                                    BoxLayout:
+                                        size_hint_y: None
+                                        height: '30dp'
+                                        Label:
+                                            text: tr._('Brightness')
+                                            size_hint_x: 0.42
+                                            font_size: '13sp'
+                                        Slider:
+                                            min: 0.2
+                                            max: 3.0
+                                            value: app.video_brightness
+                                            on_value: app.video_brightness = self.value
+                                    BoxLayout:
+                                        size_hint_y: None
+                                        height: '30dp'
+                                        Label:
+                                            text: tr._('Contrast')
+                                            size_hint_x: 0.42
+                                            font_size: '13sp'
+                                        Slider:
+                                            min: 0.2
+                                            max: 3.0
+                                            value: app.video_contrast
+                                            on_value: app.video_contrast = self.value
+                                    BoxLayout:
+                                        size_hint_y: None
+                                        height: '30dp'
+                                        Label:
+                                            text: tr._('Gamma')
+                                            size_hint_x: 0.42
+                                            font_size: '13sp'
+                                        Slider:
+                                            min: 0.2
+                                            max: 3.0
+                                            value: app.video_gamma
+                                            on_value: app.video_gamma = self.value
+                                    Button:
+                                        size_hint_y: None
+                                        height: '30dp'
+                                        text: tr._('Reset')
+                                        on_release:
+                                            app.video_brightness = 1.0
+                                            app.video_contrast = 1.0
+                                            app.video_gamma = 1.0
 
             SettingPage:
                 name: 'Setting'

@@ -6,6 +6,7 @@ from kivy.uix.recycleboxlayout import RecycleBoxLayout
 from kivy.uix.behaviors import FocusBehavior
 from kivy.uix.recycleview.layout import LayoutSelectionBehavior
 
+import threading
 import logging
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,11 @@ class ProbingPreviewPopup(ModalView):
 
     def __init__(self, controller, **kwargs):
         self.controller = controller
+        # On the Z1 the operation is either a host-side G-code script
+        # (z1_lines) or a live runner callable (z1_runner), set by
+        # ProbingPopup.show_preview. Both None means the normal single-command path.
+        self.z1_lines = None
+        self.z1_runner = None
         super(ProbingPreviewPopup, self).__init__(**kwargs)
 
     def get_probe_switch_type(self):
@@ -31,11 +37,27 @@ class ProbingPreviewPopup(ModalView):
         #     return ProbingConstants.switch_type_no
 
     def  start_probing(self):
-        if len(self.gcode) > 0:
+        if self.z1_runner is not None:
+            # Z1: multi-step / compute operation, run in a background thread so
+            # it can wait for probe results without blocking the UI.
+            logger.debug("running Z1 probing runner")
+            threading.Thread(target=self._run_z1_runner, daemon=True).start()
+        elif self.z1_lines is not None:
+            # Z1: stream the host-side probing script line by line.
+            logger.debug("running Z1 probing script: %s", self.z1_lines)
+            for line in self.z1_lines:
+                self.controller.executeCommand(line + "\n")
+        elif len(self.gcode) > 0:
             logger.debug("running gcode: " + self.gcode)
             self.controller.executeCommand(self.gcode + "\n")
         else:
             logger.error("no gcode")
+
+    def _run_z1_runner(self):
+        try:
+            self.z1_runner()
+        except Exception:
+            logger.exception("Z1 probing runner failed")
 
 class PopupMDI(RecycleView):
 

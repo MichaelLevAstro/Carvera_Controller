@@ -1,7 +1,9 @@
 from kivy.clock import Clock
+from kivy.app import App
 from kivy.uix.modalview import ModalView
 
 from ... import Controller
+from . import z1_probing
 from .operations.OperationsBase import OperationsBase
 from .operations.OutsideCorner.OutsideCornerOperationType import OutsideCornerOperationType
 from .operations.OutsideCorner.OutsideCornerSettings import OutsideCornerSettings
@@ -135,9 +137,42 @@ class ProbingPopup(ModalView):
 
         if missing_definition is None:
             gcode = operation.generate(cfg)
-            self.preview_popup.gcode = gcode
-            self.preview_popup.probe_preview_label = gcode
+            app = App.get_running_app()
+            # Multi-point bore centre (least-squares circle fit) replaces the
+            # 4-point round-bore centering on ANY machine - it only uses G38.2 +
+            # [PRB] + G10, which work on the raw and framed protocols alike.
+            bore_runner = z1_probing.build_bore_center_runner(gcode, self.controller)
+            if bore_runner is not None:
+                self.preview_popup.z1_lines = None
+                self.preview_popup.z1_runner = bore_runner
+                self.preview_popup.gcode = gcode
+                self.preview_popup.probe_preview_label = z1_probing.bore_preview_text(gcode)
+            elif app is not None and app.model == 'Z1':
+                # The Z1's stock firmware lacks the M460-M469 probing macros, so
+                # reproduce the operation on the host: either a fixed G-code
+                # script, or a live runner for multi-step / compute operations.
+                lines = z1_probing.translate(gcode)
+                runner = None if lines is not None else z1_probing.build_runner(gcode, self.controller)
+                self.preview_popup.z1_lines = lines
+                self.preview_popup.z1_runner = runner
+                if lines is not None:
+                    self.preview_popup.gcode = gcode
+                    self.preview_popup.probe_preview_label = "\n".join(lines)
+                elif runner is not None:
+                    self.preview_popup.gcode = gcode
+                    self.preview_popup.probe_preview_label = z1_probing.preview_text(gcode)
+                else:
+                    self.preview_popup.gcode = ""
+                    self.preview_popup.probe_preview_label = \
+                        "This probing operation isn't available on the Z1."
+            else:
+                self.preview_popup.z1_lines = None
+                self.preview_popup.z1_runner = None
+                self.preview_popup.gcode = gcode
+                self.preview_popup.probe_preview_label = gcode
         else:
+            self.preview_popup.z1_lines = None
+            self.preview_popup.z1_runner = None
             self.preview_popup.gcode = ""
             self.preview_popup.probe_preview_label = "Missing required parameter " + missing_definition.label
 

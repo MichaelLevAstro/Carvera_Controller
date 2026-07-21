@@ -85,6 +85,7 @@ def request_android_permissions():
 
 from .addons.probing.ProbingPopup import ProbingPopup
 from carveracontroller.addons.probing.ProbingPopup import ProbingPopup
+from carveracontroller.addons.tramming.TrammingPopup import TrammingPopup
 from carveracontroller.addons.pendant import SettingPendantSelector, SUPPORTED_PENDANTS, OverrideController
 
 import json
@@ -195,6 +196,7 @@ from .GcodeViewer import GCodeViewer
 from .Controller import Controller, NOT_CONNECTED, STATECOLOR, STATECOLORDEF,\
     LOAD_DIR, LOAD_MV, LOAD_RM, LOAD_MKDIR, LOAD_WIFI, LOAD_CONN_WIFI, CONN_USB, CONN_WIFI, SEND_FILE
 from .__version__ import __version__
+from .VideoStreamManager import VideoStreamManager
 
 from kivy.lang import Builder
 from .addons.tooltips.Tooltips import Tooltip,ToolTipButton,ToolTipDropDown
@@ -2606,6 +2608,7 @@ class Makera(RelativeLayout):
     gcode_cannot_visualise = BooleanProperty(False)
 
     probing_popup = ObjectProperty()
+    tramming_popup = ObjectProperty()
     coord_config = {}
 
     progress_info = StringProperty()
@@ -2790,6 +2793,7 @@ class Makera(RelativeLayout):
         self.manual_wifi_popup = ManualWifiPopup()
 
         self.probing_popup = ProbingPopup(self.controller)
+        self.tramming_popup = TrammingPopup(self.controller)
         self.wcs_settings_popup = WCSSettingsPopup(self.controller, self.wcs_names)
         self.set_rotation_popup = SetRotationPopup(self.controller, self.cnc)
         self.comports_drop_down = DropDown(auto_width=False, width='250dp')
@@ -2809,6 +2813,8 @@ class Makera(RelativeLayout):
         self.gcode_viewer = GCodeViewer()
         self.gcode_viewer.high_precision_time_estimate = Config.getboolean('carvera', 'high_precision_reamining_time_estimate', fallback=True)
         self.gcode_viewer_container.add_widget(self.gcode_viewer)
+        # init Z1 camera live-view manager (WiFi-only; inert on other machines)
+        self.video_manager = VideoStreamManager(self)
         self.gcode_viewer.set_frame_callback(self.gcode_play_call_back)
         self.gcode_viewer.set_play_over_callback(self.gcode_play_over_call_back)
         self.gcode_viewer.set_error_popup_callback(self._on_gcode_cannot_visualise)
@@ -3021,13 +3027,22 @@ class Makera(RelativeLayout):
                 subprocess.Popen([opener, log_dir])
 
     def open_probing_popup(self):
-        if CNC.vars["tool"] == 0 or CNC.vars["tool"] >=999990:
-            app = App.get_running_app() #disable keyboard control to prevent accidents when opening the popup
-            self.toggle_keyboard_jog_control(True)
-            self.probing_popup.open()
-        else:
+        # Valid probing tools: stock Makera probe (0), conductive 3D probe on the
+        # Z1 (9999) or on Community firmware (999990-999999).
+        app = App.get_running_app()
+        is_probe = CNC.vars["tool"] == 0 or CNC.vars["tool"] == 9999 or CNC.vars["tool"] >= 999990
+        if not is_probe:
             self.select_probe_popup = SelectAndCalibrateProbePopup()
             self.select_probe_popup.open()
+            return
+        self.toggle_keyboard_jog_control(True)  # disable keyboard control to prevent accidents
+        # The Z1 opens the same probing menu; operations are translated to
+        # host-side G-code (see addons/probing/z1_probing.py) since its firmware
+        # lacks the M460-M469 probing macros.
+        self.probing_popup.open()
+
+    def open_tramming_popup(self):
+        self.tramming_popup.open()
 
     def open_update_popup(self):
         self.upgrade_popup.check_button.disabled = False
@@ -3792,7 +3807,7 @@ class Makera(RelativeLayout):
             target_tool = 'Probe'
         elif CNC.vars['target_tool'] == 8888:
             target_tool = 'Laser'
-        elif CNC.vars['target_tool'] >= 999990 and CNC.vars['target_tool'] <= 999999:
+        elif CNC.vars['target_tool'] == 9999 or (CNC.vars['target_tool'] >= 999990 and CNC.vars['target_tool'] <= 999999):
             target_tool = '3D Probe'
 
         app = App.get_running_app()
@@ -4093,7 +4108,7 @@ class Makera(RelativeLayout):
             self.config_loading = False
             self.config_popup.btn_apply.disabled = True if len(self.setting_change_list) == 0 else False
         else:
-            self.controller.log.put(Controller.MSG_ERROR, tr._('Download config file error'))
+            self.controller.log.put((Controller.MSG_ERROR, tr._('Download config file error')))
             #self.controller.close()
 
         # Preserve selected file only when reconnecting to the same machine.
@@ -4220,6 +4235,9 @@ class Makera(RelativeLayout):
         if app.model == 'CA1':
             CNC.vars['rotation_base_width'] = 300
             CNC.vars['rotation_head_width'] = 56.5
+        elif app.model == 'Z1':
+            CNC.vars['rotation_base_width'] = 200
+            CNC.vars['rotation_head_width'] = 7
         elif app.model == 'C1':
             if CNC.vars['FuncSetting'] & 1:
                 CNC.vars['rotation_base_width'] = 330
@@ -4227,11 +4245,21 @@ class Makera(RelativeLayout):
             else:
                 CNC.vars['rotation_base_width'] = 330
                 CNC.vars['rotation_head_width'] = 7
+        # The stock Z1 firmware uses tool 9999 for the conductive 3D probe;
+        # Community firmware uses 999990.
+        app.probe_3d_tool = 9999 if app.model == 'Z1' else 999990
         if app.is_community_firmware:
                 self.tool_drop_down.set_dropdown.values = ['Empty', 'Probe','3D Probe', 'Tool: 1', 'Tool: 2', 'Tool: 3', 'Tool: 4', 'Tool: 5',
                                                             'Tool: 6', 'Laser', 'Custom']
                 self.tool_drop_down.change_dropdown.values = ['Probe', '3D Probe', 'Tool: 1', 'Tool: 2', 'Tool: 3', 'Tool: 4',
                                                                 'Tool: 5', 'Tool: 6', 'Laser', 'Custom']
+        elif app.model == 'Z1':
+                # Stock Z1: offer the conductive 3D probe and laser (no custom
+                # tool numbers — that is a Community-firmware feature).
+                self.tool_drop_down.set_dropdown.values = ['Empty', 'Probe', '3D Probe', 'Tool: 1', 'Tool: 2', 'Tool: 3',
+                                                            'Tool: 4', 'Tool: 5', 'Tool: 6', 'Laser']
+                self.tool_drop_down.change_dropdown.values = ['Probe', '3D Probe', 'Tool: 1', 'Tool: 2', 'Tool: 3',
+                                                                'Tool: 4', 'Tool: 5', 'Tool: 6', 'Laser']
         app.has_atc = bool(CNC.vars['FuncSetting'] & 4)
         # Load or reload machine config when model is detected/changed
         if model_changed:
@@ -4782,7 +4810,13 @@ class Makera(RelativeLayout):
             # The App.get_running_app() can return None in certain situations, especially during initialization or shutdown.
             if app is None:
                 return
-                
+
+            # Fallback Z1 detection: the status report's numeric MachineModel is
+            # 3 or 4 only on a Z1, so use it if the text 'model' reply was missed.
+            # (Values never seen on a C1/CA1, so this can't affect them.)
+            if not app.model and CNC.vars.get("MachineModel") in (3, 4):
+                self.setUIForModel('Z1')
+
             if app.state != CNC.vars["state"]:
                 app.state = CNC.vars["state"]
                 CNC.vars["color"] = STATECOLOR[app.state]
@@ -4801,7 +4835,11 @@ class Makera(RelativeLayout):
                     self.config_loaded = False
                     self.config_loading = False
                     self.fw_version_checked = False
-                    
+
+                    # Stop the Z1 camera stream if it was running
+                    if self.video_manager.is_connected():
+                        self.video_manager.disconnect()
+
                     # Clean up light toggle binding when disconnected
                     if hasattr(self, '_light_toggle_bound'):
                         self.unbind(light_state=self._on_light_state_changed)
@@ -5008,7 +5046,7 @@ class Makera(RelativeLayout):
                     self.tool_data_view.main_text = tr._("Probe")
                 elif CNC.vars["tool"] == 8888:
                     self.tool_data_view.main_text = tr._("Laser")
-                elif CNC.vars["tool"] == 999990:
+                elif CNC.vars["tool"] == 9999 or CNC.vars["tool"] == 999990:
                     self.tool_data_view.main_text = tr._("3DProb")
                 else:
                     self.tool_data_view.main_text = "{:.0f}".format(CNC.vars["tool"])
@@ -5333,9 +5371,26 @@ class Makera(RelativeLayout):
         except IndexError:
             logger.error("Tried to write to recycle view data at same time as reading, ignore (indexError)")
     # -----------------------------------------------------------------------
+    def detect_usb_framed(self, device):
+        """Return True if the USB port is a Z1 (ESP32 native USB), else None.
+
+        None means "unknown" and lets the controller probe the connection.
+        Detecting the ESP32 here also lets the USB stream skip the DTR reset
+        that would otherwise reboot the Z1.
+        """
+        try:
+            if comports:
+                for port in comports():
+                    if port.device == device and port.vid == 0x303A and port.pid == 0x4002:
+                        return True
+        except Exception:
+            logger.error(sys.exc_info()[1])
+        return None
+
     def openUSB(self, device):
         try:
-           self.controller.open(CONN_USB, device)
+           framed = self.detect_usb_framed(device)
+           self.controller.open(CONN_USB, device, framed=framed)
            self.controller.connection_type = CONN_USB
            # Fallback: attempt baud upgrade after 10s if version is > 2.1.0c and conditions met
            Clock.schedule_once(self.attempt_usb_baud_upgrade_if_eligible, 10)
@@ -5453,6 +5508,16 @@ class Makera(RelativeLayout):
                 if os.path.exists(ca1_config_file):
                     with open(ca1_config_file, 'r') as fd:
                         data = json.loads(fd.read())
+            elif app.model == 'Z1':
+                # Load Z1 specific config
+                z1_config_file = os.path.join(os.path.dirname(__file__), "config_z1.json")
+                if os.path.exists(z1_config_file):
+                    with open(z1_config_file, 'r') as fd:
+                        data = json.loads(fd.read())
+
+            if data is None:
+                # Unknown model or missing config file; nothing to build yet.
+                return True
 
             basic_config = []
             advanced_config = []
@@ -6291,7 +6356,17 @@ class MakeraApp(App):
     total_pages = NumericProperty(1)
     loading_page = BooleanProperty(False)
     model = StringProperty("")
+    video_connected = BooleanProperty(False)
+    # Host-side camera image adjustment (the Z1 exposes no sensor exposure).
+    video_adjust_open = BooleanProperty(False)
+    video_brightness = NumericProperty(1.0)
+    video_contrast = NumericProperty(1.0)
+    video_gamma = NumericProperty(1.0)
     is_community_firmware = BooleanProperty(False)
+    # Tool number the active firmware uses for the conductive 3D probe:
+    # 999990 on Community firmware, 9999 on the stock Z1. Kept as a single
+    # source of truth so the tool dropdowns send the right number.
+    probe_3d_tool = NumericProperty(999990)
     fw_version_digitized = NumericProperty(0)
     show_tooltips = BooleanProperty(True)
     tooltip_delay = NumericProperty(0.5)

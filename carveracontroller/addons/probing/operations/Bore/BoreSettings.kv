@@ -72,6 +72,24 @@
 
             BoxLayout:
                 ProbeSettingLabel:
+                    label_text: 'Samples (P):'
+                ToolTipTextInput:
+                    id: SamplePoints
+                    size_hint_x: 0.4
+                    font_size: '14dp'
+                    hint_text: tr._("4")
+                    hint_text_color: (0.2,0.5,0.5,0.5)
+                    tooltip_txt: tr._('Points to probe around a round bore for the circle fit (min 3). More points = more accurate centre on out-of-round bores.')
+                    tooltip_image: ''
+                    multiline: False
+                    halign:'right'
+                    input_type: 'number'
+                    input_filter: 'int'
+                    text: root.get_setting('SamplePoints')
+                    on_text: root.setting_changed('SamplePoints', self.text)
+
+            BoxLayout:
+                ProbeSettingLabel:
                     label_text: 'Pocket Depth (H):'
                 ToolTipTextInput:
                     id: PocketProbeDepth

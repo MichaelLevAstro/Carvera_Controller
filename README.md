@@ -25,6 +25,17 @@ The Community developed version of the Carvera Controller has a number of benefi
   * **Greater speed/feed** override scaling range from **10%** and up to **300%**
   * **Improved** 3D gcode visualisations, including **correct rendering** of movements around the **A axis**
 
+## Additions in This Fork
+
+This fork extends the Community Controller with support for the **Makera Z1** and additional probing/setup tooling:
+
+* **Makera Z1 support** — connect over **USB or Wi-Fi** with automatic protocol detection (the Z1's framed binary protocol), including status/DRO readout, jogging, MDI, file transfer, and job runs
+  * **Conductive 3D probing** using the Z1's stock touch-probe tool
+  * **Geometry probing on stock Z1 firmware** — single-axis (host-driven G-code) plus inside/outside **corners** and **bore/boss** cycles mapped to the firmware's native `M480` routines
+  * **Live camera view** (Wi-Fi) streamed from the Z1's onboard camera, with on-screen **brightness / contrast / gamma** adjustment
+* **Multi-point bore-center probing** — least-squares circle fit from *N* probe points, reporting **diameter** and **roundness**. Works on **any Makera machine**, not just the Z1
+* **Tramming dialog** — continuously sweeps a chosen axis between min and max (machine coordinates, loop-until-stop) to help dial in spoilboard/fixture flatness with a dial indicator
+
 ## Contributing
 
 Review this guide for [how to contribute](CONTRIBUTING.md) to this codebase.
