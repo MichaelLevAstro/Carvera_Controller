@@ -173,14 +173,9 @@ class Controller:
 
         self.is_community_firmware = False
 
-        # Wire protocol: 'raw' for Carvera/Air (newline commands + XMODEM),
-        # 'framed' for the Z1 (binary frames). Set at connection time.
         self.protocol = 'raw'
         self.frame_decoder = None
         self.last_alarm_message = ''
-        # WiFi protocol auto-detection state (USB is known from the VID/PID, so
-        # detection only runs when a caller passes framed=None). Until a machine
-        # proves itself a Z1 we speak raw, so a Carvera/Air is unaffected.
         self._detect_protocol = False
         self._connect_time = 0.0
         self._framed_probe_count = 0
@@ -228,10 +223,6 @@ class Controller:
                 self.log.put((Controller.MSG_ERROR, str(sys.exc_info()[1])))
 
     # ----------------------------------------------------------------------
-    # Send a command line, framing it for the Z1 or sending it raw otherwise.
-    # file_start=True marks upload/download commands, which the Z1 expects in a
-    # FILE_START frame; in raw mode both paths are identical newline text.
-    # ----------------------------------------------------------------------
     def _send_command_line(self, line, file_start=False, echo=True):
         if line and line[-1] != '\n':
             line += "\n"
@@ -243,12 +234,9 @@ class Controller:
         else:
             self.stream.send(line.encode())
         if echo and self.execCallback:
-            # strip a trailing ".lz" (compressed upload) for the on-screen echo
             new_line = line[:-4] + "\n" if line.endswith(".lz\n") else line
             self.execCallback(new_line)
 
-    # ----------------------------------------------------------------------
-    # Send a single realtime control byte ('?', '!', '~', 0x18, 0x19, ...).
     # ----------------------------------------------------------------------
     def _send_realtime(self, value):
         if self.stream is None:
@@ -477,8 +465,6 @@ class Controller:
         else:
             self.executeCommand("M332\n")
 
-    # Z1 dust/air modes (Makera Aero). Each is a simple on/off toggle sharing
-    # the M331.x/M332.x family with the vacuum auto mode above.
     def setBlowingMode(self, mode):
         self.executeCommand("M331.1\n" if mode else "M332.1\n")
 
@@ -622,14 +608,9 @@ class Controller:
         self._executeFileCommand(self.escape(download_command))
 
     def _executeFileCommand(self, line):
-        """Send an upload/download command (FILE_START frame on the Z1)."""
         if self.stream and line:
             try:
                 if self.protocol == 'framed':
-                    # The Z1 starts replying with file-transfer frames the moment
-                    # it receives this command. Pause the RX loop first so those
-                    # frames are read by FramedFileTransfer, not eaten (and
-                    # discarded) by streamIO.
                     self.paused = True
                 self._send_command_line(line, file_start=True)
             except:
@@ -1377,9 +1358,6 @@ class Controller:
                 CNC.vars["vacuummode"] = int(d['S'][3])
             if len(d['S']) > 4:
                 CNC.vars["spindletemp"] = float(d['S'][4])
-            # The Z1 reports extra status fields for its dust/air (Aero) modes;
-            # a Carvera/Air omits them. Presence of the fields is the capability
-            # signal the UI uses to decide whether to show the mode toggles.
             CNC.vars["has_aero_modes"] = len(d['S']) > 6
             if len(d['S']) > 5:
                 CNC.vars["powertemp"] = float(d['S'][5])
@@ -1517,15 +1495,7 @@ class Controller:
         else:
             self.stream = self.wifi_stream
 
-        # Select the wire protocol. `framed` is True/False when the caller
-        # already knows the machine type — USB is identified by its VID/PID.
-        # It is None for WiFi, whose broadcast does not reveal the model, so we
-        # start raw and auto-detect at runtime (see _maybe_detect_protocol): a
-        # Carvera/Air answers the normal handshake immediately and is left in
-        # raw untouched, while a silent Z1 is switched to framed after a grace.
         self.frame_decoder = protocol.FrameDecoder()
-        # A Z1 (framed) connects over ESP32 native USB, which must not get the
-        # Arduino-style DTR reset the raw path uses.
         esp32 = bool(framed)
         opened = (self.stream.open(address, esp32=esp32)
                   if conn_type == CONN_USB else self.stream.open(address))
@@ -1557,17 +1527,8 @@ class Controller:
             self.log.put((self.MSG_ERROR, 'Connection Failed!'))
 
     # ----------------------------------------------------------------------
-    # Runtime protocol auto-detection (WiFi only; USB is known from its VID/PID).
-    #
-    # We connect in raw mode. A Carvera/Air replies to the controller's normal
-    # handshake within a fraction of a second; the first newline we see locks
-    # raw and ends detection, so a Carvera never receives a framed byte and its
-    # connection is unchanged. A Z1 ignores raw traffic, so after a grace with
-    # no reply we send a single framed 'model' request — the Z1's framed answer
-    # trips the header sniff in streamIO and switches us to framed.
-    # ----------------------------------------------------------------------
-    DETECT_GRACE = 3.0          # seconds of raw silence before trying framed
-    DETECT_MAX_PROBES = 3       # framed requests to send before giving up
+    DETECT_GRACE = 3.0
+    DETECT_MAX_PROBES = 3
 
     def _maybe_detect_protocol(self):
         if not self._detect_protocol or self.protocol != 'raw':
@@ -1575,10 +1536,10 @@ class Controller:
         if time.time() - self._connect_time < self.DETECT_GRACE:
             return
         if self._framed_probe_count >= self.DETECT_MAX_PROBES:
-            self._detect_protocol = False   # no framed reply either; stay raw
+            self._detect_protocol = False
             return
         self._framed_probe_count += 1
-        self._connect_time = time.time()    # re-arm the grace between probes
+        self._connect_time = time.time()
         try:
             self.stream.send(protocol.encode_command("model"))
         except Exception:
@@ -1722,8 +1683,6 @@ class Controller:
             if self.stream is None:
                 return
             if self.protocol == 'framed':
-                # The '?1' continuous-jog status variant is a Community-firmware
-                # extension; the Z1 uses the plain single-char status request.
                 self._send_realtime(ord('?'))
             elif self.continuous_jog_active:
                 self.stream.send(b"?1")
@@ -2050,9 +2009,6 @@ class Controller:
                 if self.stream.waiting_for_recv():
                     data = self.stream.recv()
                     if self._detect_protocol and self.protocol == 'raw' and data:
-                        # A Z1 answers our framed probe with a framed header; a
-                        # Carvera answers raw (a newline-terminated line). The
-                        # 1-byte tail covers a header split across two reads.
                         if protocol.FRAME_HEADER.to_bytes(2, 'big') in self._detect_tail + data:
                             self._switch_to_framed()
                         elif b'\n' in data or b'\r' in data:
@@ -2083,8 +2039,6 @@ class Controller:
                 time.sleep(dynamic_delay)
 
     # ----------------------------------------------------------------------
-    # Route a single completed text line (shared by raw and framed paths).
-    # ----------------------------------------------------------------------
     def _handle_load_line(self, line_str):
         if self.loadNUM == 0 or '|MPos' in line_str:
             self.parseLine(line_str)
@@ -2095,13 +2049,9 @@ class Controller:
                 self.load_buffer_size += len(cleaned_line) + 1
 
     # ----------------------------------------------------------------------
-    # Raw newline protocol byte processing (Carvera / Carvera Air).
-    # Returns the updated partial line buffer.
-    # ----------------------------------------------------------------------
     def _process_raw(self, data, line):
         for c in (bytes([b]) for b in data):
             if c == EOT or c == CAN:
-                # Ctrl+Z = transmission complete, Ctrl+D = cancel/error
                 if len(line) > 0:
                     self.load_buffer.put(line.decode(errors='ignore'))
                     if self.loadNUM > 0:
@@ -2118,8 +2068,6 @@ class Controller:
                 line += c
         return line
 
-    # ----------------------------------------------------------------------
-    # Framed binary protocol frame processing (Makera Z1).
     # ----------------------------------------------------------------------
     def _process_framed(self, data):
         if self.frame_decoder is None:
@@ -2143,8 +2091,6 @@ class Controller:
                 text = protocol.payload_text(ptype, payload)
                 for ln in text.replace('\r\n', '\n').split('\n'):
                     self._handle_load_line(ln)
-            # File-transfer frames (0xB1-0xB6) are consumed by FramedFileTransfer
-            # while the stream is paused, so they do not reach here.
 
     def parseWCSParameters(self, line):
         """Parse WCS parameters from machine response"""

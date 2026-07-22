@@ -62,10 +62,6 @@ class CNC:
         "curfeed"    : 0.0,
         "curspindle" : 0.0,
         "spindletemp": 0.0,
-        # Machine identity/config from the status 'C' field. Defaulted (to the
-        # same values parseLine falls back to) so early readers — e.g.
-        # setUIForModel, which can run from the model reply before the first
-        # status report on a Z1 — never hit a KeyError.
         "MachineModel": 1,
         "FuncSetting": 0,
         "lasermode"  : 0,
@@ -115,9 +111,6 @@ class CNC:
         "OvRapid"    : 100,
         "OvSpindle"  : 100,
         "vacuummode" : 0,
-        # Z1 dust/air modes (Makera Aero). Only machines that report these extra
-        # status fields have them, so they stay 0 on a Carvera/Air. has_aero_modes
-        # is the capability flag the UI uses to show/hide the mode toggles.
         "has_aero_modes" : False,
         "blowingmode"    : 0,
         "bedcleanmode"   : 0,

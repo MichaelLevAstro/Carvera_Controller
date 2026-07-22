@@ -20,7 +20,7 @@ class USBStream:
     # ----------------------------------------------------------------------
     def __init__(self, log_sent_receive = False):
         self.modem = XMODEM(self.getc, self.putc, 'xmodem')
-        self.framed = False   # set True by the controller for a Z1 connection
+        self.framed = False
         handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(logging.WARNING)
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -80,9 +80,6 @@ class USBStream:
             xonxoff=False,
             rtscts=False)
         if esp32:
-            # The Z1 is an ESP32 native-USB device: DTR/RTS toggling can force a
-            # chip reset (or bootloader), and the raw buffer-clear bytes are not
-            # part of the framed protocol. Skip both.
             self.serial.flushInput()
             return True
         # Toggle DTR to reset Arduino

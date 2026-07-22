@@ -84,7 +84,7 @@ class WIFIStream:
     def __init__(self, log_sent_receive = False):
 
         self.modem = XMODEM(self.getc, self.putc, 'xmodem8k')
-        self.framed = False   # set True by the controller for a Z1 connection
+        self.framed = False
 
         handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(logging.WARNING)

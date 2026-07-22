@@ -24,15 +24,13 @@ import time
 
 FRAME_HEADER = 0x8668
 FRAME_END = 0x55AA
-MAX_DATA_LEN = 8200          # firmware rejects a DATA_LENGTH larger than this
+MAX_DATA_LEN = 8200
 
-# Outbound packet types
-PTYPE_CTRL_SINGLE = 0xA1     # single realtime char, e.g. '?', '!', '~'
-PTYPE_CTRL_MULTI = 0xA2      # a command line / gcode
-PTYPE_FILE_START = 0xB0      # 'upload'/'download' text command
-PTYPE_FILE_QUERY = 0xB7      # query currently playing file
+PTYPE_CTRL_SINGLE = 0xA1
+PTYPE_CTRL_MULTI = 0xA2
+PTYPE_FILE_START = 0xB0
+PTYPE_FILE_QUERY = 0xB7
 
-# Inbound packet types
 PTYPE_STATUS_RES = 0x81
 PTYPE_DIAG_RES = 0x82
 PTYPE_LOAD_INFO = 0x83
@@ -41,7 +39,6 @@ PTYPE_LOAD_ERROR = 0x85
 PTYPE_NORMAL_INFO = 0x90
 PTYPE_ALARM_INFO = 0x91
 
-# File-transfer packet types (both directions)
 PTYPE_FILE_MD5 = 0xB1
 PTYPE_FILE_VIEW = 0xB2
 PTYPE_FILE_DATA = 0xB3
@@ -88,14 +85,12 @@ def build_frame(ptype, payload=b''):
 
 
 def encode_command(line):
-    """A command line / gcode. The frame delimits it, so no trailing newline."""
     if isinstance(line, str):
         line = line.encode('utf-8', errors='replace')
     return build_frame(PTYPE_CTRL_MULTI, line.rstrip(b'\r\n'))
 
 
 def encode_realtime(value):
-    """A single realtime control byte (int or 1-byte bytes/str)."""
     if isinstance(value, str):
         value = value.encode('latin-1')
     if isinstance(value, (bytes, bytearray)):
@@ -104,27 +99,21 @@ def encode_realtime(value):
 
 
 def encode_file_command(line):
-    """A file-transfer text command ('upload ...' / 'download ...')."""
     if isinstance(line, str):
         line = line.encode('utf-8', errors='replace')
     return build_frame(PTYPE_FILE_START, line)
 
 
-# Payload types whose text records carry a trailing terminator byte the firmware
-# appends and the vendor app strips before parsing.
 _TEXT_TYPES = (PTYPE_STATUS_RES, PTYPE_DIAG_RES, PTYPE_NORMAL_INFO, PTYPE_LOAD_INFO)
 
 
 def payload_text(ptype, payload):
-    """Decode a text payload, dropping the firmware's trailing terminator."""
     if ptype in _TEXT_TYPES and payload.endswith((b'\n', b'\r', b'\x00')):
         payload = payload[:-1]
     return payload.decode('utf-8', errors='ignore')
 
 
 class FrameDecoder:
-    """Incremental decoder: feed raw bytes, get back complete, CRC-checked frames."""
-
     _WAIT_HEADER, _READ_LENGTH, _READ_DATA, _CHECK_FOOTER = range(4)
 
     def __init__(self):
@@ -133,11 +122,10 @@ class FrameDecoder:
     def reset(self):
         self._state = self._WAIT_HEADER
         self._buf = bytearray()
-        self._packet = bytearray()   # [lenH][lenL][ptype][payload][crcH][crcL]
+        self._packet = bytearray()
         self._expected = 0
 
     def feed(self, data):
-        """Return a list of (ptype, payload) for every complete valid frame."""
         frames = []
         for b in data:
             if self._state == self._WAIT_HEADER:
@@ -183,10 +171,6 @@ class FrameDecoder:
 
 
 def recv_packet(getc, timeout):
-    """Read one complete frame using an XMODEM-style getc(size, timeout).
-
-    Returns (ptype, payload) on a valid frame, or None on timeout/short/corrupt.
-    """
     deadline = time.time() + timeout
 
     def read_exact(n):
@@ -197,7 +181,6 @@ def recv_packet(getc, timeout):
                 buf.extend(chunk)
         return bytes(buf) if len(buf) == n else None
 
-    # sync on header
     window = bytearray()
     while time.time() < deadline:
         c = getc(1, max(0.01, deadline - time.time()))
@@ -231,12 +214,6 @@ def recv_packet(getc, timeout):
 
 
 class FramedFileTransfer:
-    """File upload/download over the framed protocol (replaces XMODEM for the Z1).
-
-    Driven by the machine: for both directions the machine requests each block by
-    sequence number. Sequence numbers are 1-based; the last data block is short
-    (no padding). Effective retry budget and timeouts match the vendor client.
-    """
 
     def __init__(self, getc, putc):
         self.getc = getc
@@ -247,10 +224,6 @@ class FramedFileTransfer:
         self.putc(build_frame(ptype, payload))
 
     def send(self, stream, md5, retry=50, callback=None):
-        """Upload a local file object to the machine.
-
-        Returns True on success, None on cancel/alarm/timeout.
-        """
         stream.seek(0, 2)
         file_size = stream.tell()
         stream.seek(0, 0)
@@ -301,7 +274,6 @@ class FramedFileTransfer:
                     self._send(PTYPE_FILE_DATA, last_data)
                 last_seq = seq
                 if callback:
-                    # community uploadCallback(packet_size, total_packets, success_count, error_count)
                     callback(FILE_PACKET_SIZE, total_packets, seq, 0)
             elif ptype == PTYPE_FILE_END:
                 return True
@@ -309,11 +281,6 @@ class FramedFileTransfer:
                 return None
 
     def recv(self, stream, md5, retry=50, callback=None):
-        """Download a file from the machine into a local file object.
-
-        Returns bytes written (>0) on success, 0 if skipped (md5 match),
-        -1 on user cancel, None on machine cancel/alarm/retry-exhausted.
-        """
         WAIT_MD5, WAIT_VIEW, READ_DATA = range(3)
         state = WAIT_MD5
         sequence = 0
@@ -382,7 +349,6 @@ class FramedFileTransfer:
                         sequence += 1
                         self._send(PTYPE_FILE_DATA, struct.pack('>I', sequence))
                     if callback:
-                        # community downloadCallback(packet_size, success_count, error_count)
                         callback(FILE_PACKET_SIZE, seq, 0)
                     error_count = total_err = 0
                     if seq == total_packet:

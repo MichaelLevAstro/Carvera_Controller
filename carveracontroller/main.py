@@ -4976,9 +4976,6 @@ class Makera(RelativeLayout):
                     self.spindle_drop_down.vacuum_switch.set_flag = True
                     self.spindle_drop_down.vacuum_switch.active = CNC.vars["vacuummode"]
 
-            # Z1 dust/air (Aero) modes — same debounced write / status sync as
-            # the vacuum mode above. has_aero_modes tracks the capability so the
-            # UI hides these on a Carvera/Air, and the block is skipped there too.
             app.has_aero_modes = CNC.vars["has_aero_modes"]
             if CNC.vars["has_aero_modes"]:
                 for name, setter, switch, var in (
@@ -5365,14 +5362,6 @@ class Makera(RelativeLayout):
             logger.error("Tried to write to recycle view data at same time as reading, ignore (indexError)")
     # -----------------------------------------------------------------------
     def detect_usb_framed(self, device):
-        """Return True if this USB port is a Z1 (ESP32 native USB), else False.
-
-        The Z1 enumerates with Espressif's VID/PID; every Carvera/Air uses a
-        different USB bridge. Returning a definite False (never None) means a
-        Carvera/Air is never protocol-probed on USB, so its connection is
-        identical to before. Identifying the ESP32 here also lets the USB
-        stream skip the DTR reset that would otherwise reboot the Z1.
-        """
         try:
             if comports:
                 for port in comports():
@@ -5503,14 +5492,12 @@ class Makera(RelativeLayout):
                     with open(ca1_config_file, 'r') as fd:
                         data = json.loads(fd.read())
             elif app.model == 'Z1':
-                # Load Z1 specific config
                 z1_config_file = os.path.join(os.path.dirname(__file__), "config_z1.json")
                 if os.path.exists(z1_config_file):
                     with open(z1_config_file, 'r') as fd:
                         data = json.loads(fd.read())
 
             if data is None:
-                # Unknown model, or the config file is missing: nothing to build.
                 return True
 
             basic_config = []
@@ -6350,8 +6337,6 @@ class MakeraApp(App):
     total_pages = NumericProperty(1)
     loading_page = BooleanProperty(False)
     model = StringProperty("")
-    # True when the connected machine reports the Z1 dust/air (Aero) status
-    # fields; drives visibility of the extra mode toggles (capability, not model).
     has_aero_modes = BooleanProperty(False)
     is_community_firmware = BooleanProperty(False)
     fw_version_digitized = NumericProperty(0)
