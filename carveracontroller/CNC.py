@@ -109,6 +109,15 @@ class CNC:
         "OvRapid"    : 100,
         "OvSpindle"  : 100,
         "vacuummode" : 0,
+        # Z1 dust/air modes (Makera Aero). Only machines that report these extra
+        # status fields have them, so they stay 0 on a Carvera/Air. has_aero_modes
+        # is the capability flag the UI uses to show/hide the mode toggles.
+        "has_aero_modes" : False,
+        "blowingmode"    : 0,
+        "bedcleanmode"   : 0,
+        "extoutmode"     : 0,
+        "dischargemode"  : 0,
+        "powertemp"      : 0.0,
         "_OvChanged" : False,
         "_OvFeed"    : 100,	# Override target values
         "_OvRapid"   : 100,

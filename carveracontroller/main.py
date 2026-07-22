@@ -2680,6 +2680,10 @@ class Makera(RelativeLayout):
         'feedrate_scale':     [0.0, 100],
         'spindle_scale':      [0.0, 100],
         'vacuum_mode':        [0.0, 0],
+        'blowing_mode':       [0.0, 0],
+        'bedclean_mode':      [0.0, 0],
+        'extout_mode':        [0.0, 0],
+        'discharge_mode':     [0.0, 0],
         'laser_mode':         [0.0, 0],
         'laser_scale':        [0.0, 100],
         'laser_test':         [0.0, 0],
@@ -4227,6 +4231,9 @@ class Makera(RelativeLayout):
             else:
                 CNC.vars['rotation_base_width'] = 330
                 CNC.vars['rotation_head_width'] = 7
+        elif app.model == 'Z1':
+            CNC.vars['rotation_base_width'] = 200
+            CNC.vars['rotation_head_width'] = 7
         if app.is_community_firmware:
                 self.tool_drop_down.set_dropdown.values = ['Empty', 'Probe','3D Probe', 'Tool: 1', 'Tool: 2', 'Tool: 3', 'Tool: 4', 'Tool: 5',
                                                             'Tool: 6', 'Laser', 'Custom']
@@ -4969,6 +4976,30 @@ class Makera(RelativeLayout):
                     self.spindle_drop_down.vacuum_switch.set_flag = True
                     self.spindle_drop_down.vacuum_switch.active = CNC.vars["vacuummode"]
 
+            # Z1 dust/air (Aero) modes — same debounced write / status sync as
+            # the vacuum mode above. has_aero_modes tracks the capability so the
+            # UI hides these on a Carvera/Air, and the block is skipped there too.
+            app.has_aero_modes = CNC.vars["has_aero_modes"]
+            if CNC.vars["has_aero_modes"]:
+                for name, setter, switch, var in (
+                    ('blowing_mode', self.controller.setBlowingMode,
+                     self.spindle_drop_down.blowing_switch, 'blowingmode'),
+                    ('bedclean_mode', self.controller.setBedCleanMode,
+                     self.spindle_drop_down.bedclean_switch, 'bedcleanmode'),
+                    ('extout_mode', self.controller.setExtoutMode,
+                     self.spindle_drop_down.extout_switch, 'extoutmode'),
+                    ('discharge_mode', self.controller.setDischargeMode,
+                     self.spindle_drop_down.discharge_switch, 'dischargemode'),
+                ):
+                    elapsed = now - self.control_list[name][0]
+                    if elapsed < 2:
+                        if elapsed > 0.5:
+                            setter(self.control_list[name][1])
+                            self.control_list[name][0] = now - 2
+                    elif elapsed > 3:
+                        if switch.active != CNC.vars[var]:
+                            switch.set_flag = True
+                            switch.active = CNC.vars[var]
 
             elapsed = now - self.control_list['spindle_scale'][0]
             if elapsed < 2:
@@ -5333,9 +5364,27 @@ class Makera(RelativeLayout):
         except IndexError:
             logger.error("Tried to write to recycle view data at same time as reading, ignore (indexError)")
     # -----------------------------------------------------------------------
+    def detect_usb_framed(self, device):
+        """Return True if this USB port is a Z1 (ESP32 native USB), else False.
+
+        The Z1 enumerates with Espressif's VID/PID; every Carvera/Air uses a
+        different USB bridge. Returning a definite False (never None) means a
+        Carvera/Air is never protocol-probed on USB, so its connection is
+        identical to before. Identifying the ESP32 here also lets the USB
+        stream skip the DTR reset that would otherwise reboot the Z1.
+        """
+        try:
+            if comports:
+                for port in comports():
+                    if port.device == device and port.vid == 0x303A and port.pid == 0x4002:
+                        return True
+        except Exception:
+            logger.error(sys.exc_info()[1])
+        return False
+
     def openUSB(self, device):
         try:
-           self.controller.open(CONN_USB, device)
+           self.controller.open(CONN_USB, device, framed=self.detect_usb_framed(device))
            self.controller.connection_type = CONN_USB
            # Fallback: attempt baud upgrade after 10s if version is > 2.1.0c and conditions met
            Clock.schedule_once(self.attempt_usb_baud_upgrade_if_eligible, 10)
@@ -5453,6 +5502,16 @@ class Makera(RelativeLayout):
                 if os.path.exists(ca1_config_file):
                     with open(ca1_config_file, 'r') as fd:
                         data = json.loads(fd.read())
+            elif app.model == 'Z1':
+                # Load Z1 specific config
+                z1_config_file = os.path.join(os.path.dirname(__file__), "config_z1.json")
+                if os.path.exists(z1_config_file):
+                    with open(z1_config_file, 'r') as fd:
+                        data = json.loads(fd.read())
+
+            if data is None:
+                # Unknown model, or the config file is missing: nothing to build.
+                return True
 
             basic_config = []
             advanced_config = []
@@ -6291,6 +6350,9 @@ class MakeraApp(App):
     total_pages = NumericProperty(1)
     loading_page = BooleanProperty(False)
     model = StringProperty("")
+    # True when the connected machine reports the Z1 dust/air (Aero) status
+    # fields; drives visibility of the extra mode toggles (capability, not model).
+    has_aero_modes = BooleanProperty(False)
     is_community_firmware = BooleanProperty(False)
     fw_version_digitized = NumericProperty(0)
     show_tooltips = BooleanProperty(True)

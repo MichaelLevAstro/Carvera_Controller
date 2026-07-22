@@ -669,6 +669,10 @@
 
 <SpindleDropDown>:
     vacuum_switch: vacuum_switch
+    blowing_switch: blowing_switch
+    bedclean_switch: bedclean_switch
+    extout_switch: extout_switch
+    discharge_switch: discharge_switch
     scale_slider: scale_slider
     status_scale: status_scale
     status_target: status_target
@@ -724,6 +728,69 @@
             on_active:
                 if self.set_flag: self.set_flag = False
                 else: app.root.update_control('vacuum_mode', self.active)
+    # Z1 dust/air (Aero) modes. Collapses to zero height/opacity on machines
+    # whose status does not report them (app.has_aero_modes), so a Carvera/Air
+    # is unchanged; shown for any machine that advertises the capability.
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint_y: None
+        height: (dp(20) + dp(40) * 4) if app.has_aero_modes else 0
+        opacity: 1 if app.has_aero_modes else 0
+        disabled: not app.has_aero_modes
+        DropDownHint:
+            text: tr._(' Dust / Air')
+        BoxLayout:
+            padding: '0.5dp'
+            size_hint_y: None
+            height: '40dp'
+            Label:
+                text: tr._('Air Blowing')
+                font_size: '15sp'
+            Switch:
+                id: blowing_switch
+                set_flag: False
+                on_active:
+                    if self.set_flag: self.set_flag = False
+                    else: app.root.update_control('blowing_mode', self.active)
+        BoxLayout:
+            padding: '0.5dp'
+            size_hint_y: None
+            height: '40dp'
+            Label:
+                text: tr._('Bed Clean')
+                font_size: '15sp'
+            Switch:
+                id: bedclean_switch
+                set_flag: False
+                on_active:
+                    if self.set_flag: self.set_flag = False
+                    else: app.root.update_control('bedclean_mode', self.active)
+        BoxLayout:
+            padding: '0.5dp'
+            size_hint_y: None
+            height: '40dp'
+            Label:
+                text: tr._('Ext Output')
+                font_size: '15sp'
+            Switch:
+                id: extout_switch
+                set_flag: False
+                on_active:
+                    if self.set_flag: self.set_flag = False
+                    else: app.root.update_control('extout_mode', self.active)
+        BoxLayout:
+            padding: '0.5dp'
+            size_hint_y: None
+            height: '40dp'
+            Label:
+                text: tr._('Discharge')
+                font_size: '15sp'
+            Switch:
+                id: discharge_switch
+                set_flag: False
+                on_active:
+                    if self.set_flag: self.set_flag = False
+                    else: app.root.update_control('discharge_mode', self.active)
     DropDownHint:
         text: tr._('RPM Scaling')
     BoxLayout:
