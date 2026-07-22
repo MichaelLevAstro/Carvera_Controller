@@ -62,6 +62,12 @@ class CNC:
         "curfeed"    : 0.0,
         "curspindle" : 0.0,
         "spindletemp": 0.0,
+        # Machine identity/config from the status 'C' field. Defaulted (to the
+        # same values parseLine falls back to) so early readers — e.g.
+        # setUIForModel, which can run from the model reply before the first
+        # status report on a Z1 — never hit a KeyError.
+        "MachineModel": 1,
+        "FuncSetting": 0,
         "lasermode"  : 0,
         "laserstate": 0,
         "lasertesting": 0,
