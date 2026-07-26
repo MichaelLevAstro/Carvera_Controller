@@ -110,6 +110,8 @@ ZPROBE_TOOL_NUMBER = 0
 PROBE_TOOLS_RANGE_START = 999990
 PROBE_TOOLS_RANGE_END = 999999
 PROBE_3D_TOOL_NUMBER = PROBE_TOOLS_RANGE_START
+# The stock Z1 firmware uses tool 9999 for the conductive 3D probe.
+Z1_PROBE_3D_TOOL_NUMBER = 9999
 
 
 def is_probe_tools_range(tool_num):
@@ -119,6 +121,15 @@ def is_probe_tools_range(tool_num):
     except (TypeError, ValueError):
         return False
     return PROBE_TOOLS_RANGE_START <= n <= PROBE_TOOLS_RANGE_END
+
+
+def is_3d_probe_tool(tool_num):
+    """True if *tool_num* is a conductive 3D probe on Community firmware or on the stock Z1."""
+    try:
+        n = int(tool_num)
+    except (TypeError, ValueError):
+        return False
+    return n in (PROBE_3D_TOOL_NUMBER, Z1_PROBE_3D_TOOL_NUMBER)
 
 
 # ===============================================================================

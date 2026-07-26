@@ -199,9 +199,11 @@ from .CNC import (
     LASER_TOOL_NUMBER,
     OCODE_PATTERN,
     PROBE_3D_TOOL_NUMBER,
+    Z1_PROBE_3D_TOOL_NUMBER,
     ZPROBE_TOOL_NUMBER,
     escape_gcode_markup,
     highlight_gcode_line,
+    is_3d_probe_tool,
     is_probe_tools_range,
 )
 from .Controller import (
@@ -3416,7 +3418,14 @@ class Makera(RelativeLayout):
                 subprocess.Popen([opener, log_dir])
 
     def open_probing_popup(self):
-        if CNC.vars["tool"] == ZPROBE_TOOL_NUMBER or is_probe_tools_range(CNC.vars["tool"]):
+        # The Z1 opens the same probing menu; operations are translated to
+        # host-side G-code (see addons/probing/z1_probing.py) since its firmware
+        # lacks the M460-M469 probing macros.
+        if (
+            CNC.vars["tool"] == ZPROBE_TOOL_NUMBER
+            or is_probe_tools_range(CNC.vars["tool"])
+            or is_3d_probe_tool(CNC.vars["tool"])
+        ):
             # Disable keyboard control to prevent accidents when opening the popup
             # But save the state to restore after probing is closed
             self._pre_modal_keyboard_jog = self.keyboard_jog_control
@@ -4421,7 +4430,7 @@ class Makera(RelativeLayout):
             target_tool = "Probe"
         elif CNC.vars["target_tool"] == LASER_TOOL_NUMBER:
             target_tool = "Laser"
-        elif CNC.vars["target_tool"] == PROBE_3D_TOOL_NUMBER:
+        elif is_3d_probe_tool(CNC.vars["target_tool"]):
             target_tool = "3D Probe"
         elif is_probe_tools_range(CNC.vars["target_tool"]):
             target_tool = "Custom Probe"
@@ -5089,6 +5098,7 @@ class Makera(RelativeLayout):
             else:
                 CNC.vars["rotation_base_width"] = 330
                 CNC.vars["rotation_head_width"] = 7
+        app.probe_3d_tool = Z1_PROBE_3D_TOOL_NUMBER if app.model == "Z1" else PROBE_3D_TOOL_NUMBER
         if app.is_community_firmware:
             self.tool_drop_down.set_dropdown.values = [
                 "Empty",
@@ -5114,6 +5124,32 @@ class Makera(RelativeLayout):
                 "Tool: 6",
                 "Laser",
                 "Custom",
+            ]
+        elif app.model == "Z1":
+            # Stock Z1: offer the conductive 3D probe and laser, but no custom
+            # tool numbers - that is a Community-firmware feature.
+            self.tool_drop_down.set_dropdown.values = [
+                "Empty",
+                "Probe",
+                "3D Probe",
+                "Tool: 1",
+                "Tool: 2",
+                "Tool: 3",
+                "Tool: 4",
+                "Tool: 5",
+                "Tool: 6",
+                "Laser",
+            ]
+            self.tool_drop_down.change_dropdown.values = [
+                "Probe",
+                "3D Probe",
+                "Tool: 1",
+                "Tool: 2",
+                "Tool: 3",
+                "Tool: 4",
+                "Tool: 5",
+                "Tool: 6",
+                "Laser",
             ]
         app.has_atc = bool(CNC.vars["FuncSetting"] & 4)
         # The first machine config load must happen after /sd/config.txt is parsed.
@@ -6133,7 +6169,7 @@ class Makera(RelativeLayout):
                     self.tool_data_view.main_text = tr._("Probe")
                 elif CNC.vars["tool"] == LASER_TOOL_NUMBER:
                     self.tool_data_view.main_text = tr._("Laser")
-                elif CNC.vars["tool"] == PROBE_3D_TOOL_NUMBER:
+                elif is_3d_probe_tool(CNC.vars["tool"]):
                     self.tool_data_view.main_text = tr._("3DProb")
                 else:
                     self.tool_data_view.main_text = "{:.0f}".format(CNC.vars["tool"])
@@ -7626,7 +7662,7 @@ class Makera(RelativeLayout):
                     tool_change_label = "L"
                 elif self.cnc.tool == ZPROBE_TOOL_NUMBER and (self.cnc.tool != prev_tool or self.cnc.tool_cmd):
                     tool_change_label = "P"
-                elif self.cnc.tool == PROBE_3D_TOOL_NUMBER and (self.cnc.tool != prev_tool or self.cnc.tool_cmd):
+                elif is_3d_probe_tool(self.cnc.tool) and (self.cnc.tool != prev_tool or self.cnc.tool_cmd):
                     tool_change_label = "3DP"
                 elif self.cnc.tool >= 1 and self.cnc.tool != prev_tool:
                     tool_change_label = "T%d" % self.cnc.tool
@@ -7795,6 +7831,10 @@ class MakeraApp(App):
     camera_gamma = NumericProperty(ADJUST_DEFAULT)
     camera_resolution = NumericProperty(DEFAULT_RESOLUTION)
     supports_auto_ext_out = BooleanProperty(False)
+    # Tool number the active firmware uses for the conductive 3D probe: 999990
+    # on Community firmware, 9999 on the stock Z1. Single source of truth so the
+    # tool dropdowns send the right number.
+    probe_3d_tool = NumericProperty(PROBE_3D_TOOL_NUMBER)
     fw_version_digitized = NumericProperty(0)
     show_tooltips = BooleanProperty(True)
     tooltip_delay = NumericProperty(0.5)
