@@ -23,6 +23,11 @@ class BoreOperation(OperationsBase):
             config[BoreParameterDefinitions.XAxisDistance.code] = ""
         if not self.requires_y:
             config[BoreParameterDefinitions.YAxisDistance.code] = ""
+        if not (self.requires_x and self.requires_y):
+            # P only feeds the host-side multi-point circle fit, which handles
+            # the full round-bore case. The single-axis M461 goes to the
+            # firmware, which has no P parameter.
+            config[BoreParameterDefinitions.SamplePoints.code] = ""
 
         return "M461" + self.config_to_gcode(config)
 

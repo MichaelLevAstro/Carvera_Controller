@@ -183,6 +183,11 @@ class Controller:
         # Connection-scoped comms protocol (detect on open; follows M485 switches)
         self.comms = ProtocolSession(on_change=self._on_comms_protocol_changed)
 
+        # Probe result capture for host-side probing: last [PRB:x,y,z:ok] in
+        # machine coordinates, and a counter that increments on each result.
+        self.last_prb = None
+        self.prb_count = 0
+
         # Jog related variables
         self.jog_mode = Controller.JOG_MODE_STEP
         self.jog_speed = 10000  # mm/min. A value of 0 here would suggest to use last used feed
@@ -2100,6 +2105,12 @@ class Controller:
             elif line[0] == "[" in line:
                 # Log raw WCS parameters before parsing
                 self.log.put((self.MSG_NORMAL, line))
+                # Capture probe results for host-side probing: [PRB:x,y,z:ok]
+                if line.startswith("[PRB:"):
+                    prb = re.match(r"\[PRB:([+\-]?\d*\.?\d+),([+\-]?\d*\.?\d+),([+\-]?\d*\.?\d+):(\d)\]", line)
+                    if prb:
+                        self.last_prb = (float(prb[1]), float(prb[2]), float(prb[3]), int(prb[4]))
+                        self.prb_count += 1
                 # Parse WCS parameters: [G54:-123.6800,-123.6800,-123.6800,-50,0.000,25.123]
                 self.parseWCSParameters(line)
             elif line[0] == "#":
