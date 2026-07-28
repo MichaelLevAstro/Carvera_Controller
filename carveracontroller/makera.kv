@@ -4249,6 +4249,7 @@
                             id: float_layout
                             color_scheme_panel: color_scheme_panel
                             camera_controls: camera_controls
+                            camera_jog: camera_jog
                             tool_bar: tool_bar
                             t1: t1
                             t2: t2
@@ -4514,6 +4515,11 @@
                             CameraControls:
                                 id: camera_controls
                                 pos_hint: {'right': 1, 'top': 1}
+                            CameraJogPanel:
+                                id: camera_jog
+                                visible: camera_controls.jog_open and app.camera_streaming
+                                x: float_layout.x + dp(6)
+                                y: gcode_ctl_bar.top + dp(6)
 
             SettingPage:
                 name: 'Setting'

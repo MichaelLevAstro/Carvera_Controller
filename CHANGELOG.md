@@ -28,6 +28,7 @@
 - Enhancement: Initial Z1 support
 - Enhancement: Resume-at-line warns when the recovery sequence is missing a tool change, feed rate, or spindle speed
 - Enhancement: Live camera view for the Makera Z1. Resolution can be changed while streaming, and brightness, contrast and gamma adjusted while viewing
+- Enhancement: Optional jog pad in the corner of the camera view, so the machine can be moved while watching the camera
 - Fixed: Restore Keyboard Jogging state after Probing Popup is closed
 - Fixed: Confirmation dialogs no longer retain expanded layouts from laser and resume warnings
 - Fixed: Repeated firmware checks now happen just once

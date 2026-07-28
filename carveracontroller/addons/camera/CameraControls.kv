@@ -41,8 +41,77 @@
         value: root.value
         on_value: root.value = self.value
 
+<CameraJogPanel@BoxLayout>:
+    visible: False
+    orientation: 'horizontal'
+    size_hint: None, None
+    width: '196dp'
+    height: '124dp' if self.visible else 0
+    opacity: 1 if self.visible else 0
+    disabled: not self.visible or not (app.state == 'Idle' or app.state == 'Run' or app.state == 'Pause') or (app.playing and app.state != 'Pause') or (app.state == 'Run' and app.root.allow_jogging_while_machine_running == '0')
+    padding: '6dp'
+    spacing: '6dp'
+    canvas.before:
+        Color:
+            rgba: 0, 0, 0, 0.6
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(10),]
+    GridLayout:
+        # Same arrangement as the Control page so muscle memory carries over.
+        cols: 3
+        rows: 3
+        spacing: '3dp'
+        Widget:
+        SmallRoundButton:
+            text: 'Y+' if app.invert_y_axis_jogging else 'Y-'
+            on_press: app.root.controller.jog("Y{}{}".format('' if app.invert_y_axis_jogging else '-', step_xy.text))
+            on_release: app.root.controller.stopContinuousJog()
+        Widget:
+        SmallRoundButton:
+            text: 'X-'
+            on_press: app.root.controller.jog("X-{}".format(step_xy.text))
+            on_release: app.root.controller.stopContinuousJog()
+        Spinner:
+            id: step_xy
+            font_size: '13sp'
+            text: '1'
+            values: '10', '1', '0.1', '0.01', '0.005'
+            disabled: app.jog_mode_text == tr._('Jog Mode:Continuous')
+        SmallRoundButton:
+            text: 'X+'
+            on_press: app.root.controller.jog("X{}".format(step_xy.text))
+            on_release: app.root.controller.stopContinuousJog()
+        Widget:
+        SmallRoundButton:
+            text: 'Y-' if app.invert_y_axis_jogging else 'Y+'
+            on_press: app.root.controller.jog("Y{}{}".format('-' if app.invert_y_axis_jogging else '', step_xy.text))
+            on_release: app.root.controller.stopContinuousJog()
+        Widget:
+    BoxLayout:
+        orientation: 'vertical'
+        size_hint_x: None
+        width: '46dp'
+        spacing: '3dp'
+        SmallRoundButton:
+            text: 'Z+'
+            on_press: app.root.controller.jog("Z{}".format(step_z.text))
+            on_release: app.root.controller.stopContinuousJog()
+        Spinner:
+            id: step_z
+            font_size: '13sp'
+            text: '1'
+            values: '10', '1', '0.1', '0.01', '0.005'
+            disabled: app.jog_mode_text == tr._('Jog Mode:Continuous')
+        SmallRoundButton:
+            text: 'Z-'
+            on_press: app.root.controller.jog("Z-{}".format(step_z.text))
+            on_release: app.root.controller.stopContinuousJog()
+
 <CameraControls@BoxLayout>:
     adjust_open: False
+    jog_open: False
     orientation: 'vertical'
     size_hint: None, None
     width: '250dp'
@@ -67,6 +136,16 @@
             height: self.parent.height
             on_release:
                 root.adjust_open = not root.adjust_open
+    CameraButtonSlot:
+        visible: app.camera_streaming
+        TransparentButton:
+            icon: 'data/move.png'
+            active: root.jog_open
+            size_hint: None, None
+            width: '50dp'
+            height: self.parent.height
+            on_release:
+                root.jog_open = not root.jog_open
     CameraAdjustPanel:
         visible: root.adjust_open and app.camera_streaming
         BoxLayout:

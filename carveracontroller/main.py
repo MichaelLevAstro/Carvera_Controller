@@ -422,13 +422,14 @@ class FloatBox(FloatLayout):
     touch_interval = 0
     color_scheme_panel = ObjectProperty(None)
     camera_controls = ObjectProperty(None)
+    camera_jog = ObjectProperty(None)
 
     def _viewer_chrome_hit(self, touch):
         if self.gcode_ctl_bar.collide_point(*touch.pos):
             return True
         return any(
             panel is not None and panel.collide_point(*touch.pos)
-            for panel in (self.color_scheme_panel, self.camera_controls)
+            for panel in (self.color_scheme_panel, self.camera_controls, self.camera_jog)
         )
 
     def on_touch_down(self, touch):
