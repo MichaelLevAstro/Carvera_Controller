@@ -1,4 +1,4 @@
-import sys
+import logging
 import webbrowser
 
 from kivy.app import App
@@ -17,6 +17,36 @@ from kivy.uix.popup import Popup
 from kivy.uix.spinner import Spinner
 from kivy.uix.switch import Switch
 from kivy.uix.textinput import TextInput
+from kivy.utils import platform as kivy_platform
+
+logger = logging.getLogger(__name__)
+
+# Tooltips are a hover affordance: on a touch screen they pop up over the field
+# being edited and have to be dismissed before the input can be read back, so
+# mobile builds never show them.
+TOOLTIPS_SUPPORTED = kivy_platform not in ("android", "ios")
+
+
+def use_android_decimal_keyboard(text_input):
+    """Show a decimal keypad for numeric fields on Android.
+
+    Kivy asks Android for a plain TYPE_CLASS_NUMBER keyboard for
+    ``input_type: 'number'``, which has no '.' or '-' key, so fractions and
+    negative values cannot be typed. Re-request the keyboard with the decimal
+    and signed flags after Kivy has shown it.
+    """
+    if kivy_platform != "android" or text_input.input_type != "number":
+        return
+    try:
+        from android import mActivity
+        from jnius import autoclass
+
+        input_type = autoclass("android.text.InputType")
+        mActivity.changeKeyboard(
+            input_type.TYPE_CLASS_NUMBER | input_type.TYPE_NUMBER_FLAG_DECIMAL | input_type.TYPE_NUMBER_FLAG_SIGNED
+        )
+    except Exception as e:
+        logger.warning(f"Could not switch to the decimal keyboard: {e}")
 
 
 class Tooltip(BoxLayout):
@@ -47,8 +77,7 @@ class ToolTipSwitch(Switch):
     def __init__(self, **kwargs):
         self._tooltip = None
         super().__init__(**kwargs)
-        # On iOS, tooltips are not supported, so we disable them
-        if sys.platform == "ios":
+        if not TOOLTIPS_SUPPORTED:
             return
         fbind = self.fbind
         fbind("tooltip_cls", self._build_tooltip)
@@ -204,8 +233,7 @@ class ToolTipTextInput(TextInput):
     def __init__(self, **kwargs):
         self._tooltip = None
         super().__init__(**kwargs)
-        # On iOS, tooltips are not supported, so we disable them
-        if sys.platform == "ios":
+        if not TOOLTIPS_SUPPORTED:
             return
         fbind = self.fbind
         fbind("tooltip_cls", self._build_tooltip)
@@ -219,6 +247,7 @@ class ToolTipTextInput(TextInput):
     def on_input_focus(self, instance, value):
         if value:
             App.get_running_app().root.toggle_keyboard_jog_control(True)
+            use_android_decimal_keyboard(self)
 
     def _is_blocked_by_modal(self):
         for child in Window.children:
@@ -366,8 +395,7 @@ class ToolTipButton(Button):
     def __init__(self, **kwargs):
         self._tooltip = None
         super().__init__(**kwargs)
-        # On iOS, tooltips are not supported, so we disable them
-        if sys.platform == "ios":
+        if not TOOLTIPS_SUPPORTED:
             return
         fbind = self.fbind
         fbind("tooltip_cls", self._build_tooltip)
@@ -523,8 +551,7 @@ class ToolTipDropDown(DropDown):
     def __init__(self, **kwargs):
         self._tooltip = None
         super().__init__(**kwargs)
-        # On iOS, tooltips are not supported, so we disable them
-        if sys.platform == "ios":
+        if not TOOLTIPS_SUPPORTED:
             return
         fbind = self.fbind
         fbind("tooltip_cls", self._build_tooltip)
@@ -680,8 +707,7 @@ class ToolTipLabel(Label):
     def __init__(self, **kwargs):
         self._tooltip = None
         super().__init__(**kwargs)
-        # On iOS, tooltips are not supported, so we disable them
-        if sys.platform == "ios":
+        if not TOOLTIPS_SUPPORTED:
             return
         fbind = self.fbind
         fbind("tooltip_cls", self._build_tooltip)

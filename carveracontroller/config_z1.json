@@ -440,6 +440,14 @@
     },
     {
         "type": "numeric",
+        "title": "Spindle Fan Power for Play",
+        "desc": "Spindle fan power while running a job (30 - 100). The cooldown settings below override this once the spindle passes the cooldown threshold",
+        "section": "Advanced",
+        "key": "playspindlefanvalue",
+        "default": "30"
+    },
+    {
+        "type": "numeric",
         "title": "Cooldown Threshold",
         "desc": "Temperature to turn on or off spindle fan",
         "section": "Advanced",

@@ -6,6 +6,12 @@ import quicklz
 # import os
 # os.environ["KIVY_METRICS_DENSITY"] = '1'
 
+# A link that died while the app was backgrounded (phone locked, app switched)
+# never comes back on its own, so a disconnect noticed this soon after the app
+# resumes triggers a reconnect right away instead of the usual countdown.
+RESUME_RECONNECT_WINDOW = 15  # s
+RESUME_RECONNECT_DELAY = 1  # s, gives the WiFi radio time to reassociate
+
 CONFIG_FILES_TO_BACK_UP = [
     "/sd/cartesian_nm.grid",
     "/sd/config.default",
@@ -3158,6 +3164,7 @@ class Makera(RelativeLayout):
         self.wifi_event = lambda instance, x: self.openWIFI(x)
 
         self.heartbeat_time = 0
+        self.resume_time = 0
         self.machine_metadata_query_time = 0
         self.file_just_loaded = False
         self.last_connection_method = Config.get("carvera", "last_connection_method", fallback="") or ""
@@ -3728,6 +3735,7 @@ class Makera(RelativeLayout):
 
                     # Start countdown timer
                     Clock.schedule_interval(self.reconnection_popup.countdown_tick, 1.0)
+                    self.retry_connection_after_resume()
                 else:
                     # Show reconnection popup in manual mode
                     self.reconnection_popup.show_manual_reconnect(self.attempt_reconnect)
@@ -4008,6 +4016,21 @@ class Makera(RelativeLayout):
             Clock.unschedule(self.reconnection_popup.countdown_tick)
             self.reconnection_popup.dismiss()
         self.reconnect_last_connection(quiet=False, for_app_launch=False)
+
+    def on_app_resume(self):
+        """Called when the app comes back to the foreground (mobile)."""
+        self.resume_time = time.time()
+        # The connection loss may already be on screen, otherwise the heartbeat
+        # check notices it within half a second and calls us back.
+        if self.reconnection_popup._is_open and self.reconnection_popup.auto_reconnect_mode:
+            self.retry_connection_after_resume()
+
+    def retry_connection_after_resume(self):
+        """Reconnect now rather than waiting out the countdown, if we just resumed"""
+        if not self.resume_time or time.time() - self.resume_time > RESUME_RECONNECT_WINDOW:
+            return
+        self.resume_time = 0
+        Clock.schedule_once(lambda dt: self.attempt_reconnect(), RESUME_RECONNECT_DELAY)
 
     def on_reconnect_failed(self):
         """Called when all reconnection attempts have failed"""
@@ -5300,6 +5323,7 @@ class Makera(RelativeLayout):
         config_files = {
             "C1": "config_c1.json",
             "CA1": "config_ca1.json",
+            "Z1": "config_z1.json",
         }
         config_file = config_files.get(app.model)
         if config_file is None:
@@ -5962,6 +5986,7 @@ class Makera(RelativeLayout):
                             self.reconnection_popup.open()
                             Clock.schedule_interval(self.reconnection_popup.countdown_tick, 1.0)
                             self.controller.start_reconnection()
+                            self.retry_connection_after_resume()
                         else:
                             self.reconnection_popup.show_manual_reconnect(self.attempt_reconnect)
                             self.reconnection_popup.open()
@@ -7911,6 +7936,10 @@ class MakeraApp(App):
 
     def on_pause(self):
         return True
+
+    def on_resume(self):
+        if self.root:
+            self.root.on_app_resume()
 
 
 def load_app_configs():
